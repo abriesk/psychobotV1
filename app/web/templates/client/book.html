@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Book Consultation{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Book Your Consultation</h2>
+    
+    <form id="bookingForm" action="/api/booking/submit" method="POST">
+        <div class="form-group">
+            <label>Consultation Type:</label>
+            <select name="consultation_type" id="consultationType" required>
+                <option value="individual">Individual (60 min)</option>
+                <option value="couple">Couple (90 min)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Format:</label>
+            <select name="format" id="format" required>
+                <option value="online">Online</option>
+                <option value="onsite">On-site</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Your Timezone:</label>
+            <select name="timezone" id="timezone" required>
+                <option value="UTC+4">UTC+4 (Yerevan)</option>
+                <option value="UTC+3">UTC+3 (Moscow)</option>
+                <option value="UTC+2">UTC+2 (Kiev)</option>
+                <option value="UTC+1">UTC+1 (Berlin)</option>
+                <option value="UTC+0">UTC+0 (London)</option>
+                <option value="UTC-5">UTC-5 (New York)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Available Time Slots:</label>
+            <button type="button" id="loadSlots" class="btn">Load Available Slots</button>
+            <div id="slotsContainer" style="margin-top: 1rem;"></div>
+            <input type="hidden" name="slot_id" id="selectedSlotId" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Brief Description (Optional):</label>
+            <textarea name="problem" placeholder="What would you like to discuss?"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label>Preferred Contact Method:</label>
+            <input type="text" name="contact_method" placeholder="Telegram, WhatsApp, Email, etc." required>
+        </div>
+        
+        <button type="submit" class="btn btn-success">Submit Booking Request</button>
+    </form>
+    
+    <div id="message" style="margin-top: 1rem;"></div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('loadSlots').addEventListener('click', async () => {
+    const format = document.getElementById('format').value;
+    const timezone = document.getElementById('timezone').value;
+    const isOnline = format === 'online';
+    
+    const response = await fetch(`/api/slots/available?is_online=${isOnline}&timezone_offset=${timezone}&limit=10`);
+    const data = await response.json();
+    
+    const container = document.getElementById('slotsContainer');
+    container.innerHTML = '';
+    
+    if (data.slots.length === 0) {
+        container.innerHTML = '<p style="color: #e74c3c;">No available slots at this time.</p>';
+        return;
+    }
+    
+    data.slots.forEach(slot => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.style.marginRight = '0.5rem';
+        btn.style.marginBottom = '0.5rem';
+        btn.textContent = `📅 ${slot.display_time} (${slot.duration_minutes} min)`;
+        btn.onclick = () => {
+            document.getElementById('selectedSlotId').value = slot.id;
+            document.querySelectorAll('#slotsContainer button').forEach(b => b.style.background = '#3498db');
+            btn.style.background = '#27ae60';
+        };
+        container.appendChild(btn);
+    });
+});
+
+document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/api/booking/submit', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const result = await response.json();
+    const messageDiv = document.getElementById('message');
+    
+    if (result.success) {
+        messageDiv.innerHTML = `
+            <div class="alert alert-success">
+                <h3>✅ Booking Request Submitted!</h3>
+                <p>Reference: ${result.request_uuid}</p>
+                <p>Time: ${result.slot_time}</p>
+                <p>${result.message}</p>
+            </div>
+        `;
+        e.target.reset();
+        document.getElementById('slotsContainer').innerHTML = '';
+    } else {
+        messageDiv.innerHTML = `<div class="alert alert-error">Error: ${result.message || 'Please try again'}</div>`;
+    }
+});
+</script>
+{% endblock %}

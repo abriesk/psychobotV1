@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Nginx Proxy Manager - Reverse proxy with GUI
+  npm:
+    image: 'jc21/nginx-proxy-manager:latest'
+    ports:
+      - '80:80'      # HTTP
+      - '443:443'    # HTTPS
+      - '81:81'      # NPM Admin UI
+    environment:
+      DB_SQLITE_FILE: "/data/database.sqlite"
+    volumes:
+      - ./npm/data:/data
+      - ./npm/letsencrypt:/etc/letsencrypt
+    restart: unless-stopped
+    networks:
+      - psychobot-network
+
+  # FastAPI Web Backend
+  web:
+    build: .
+    env_file: .env
+    expose:
+      - "8000"  # Only accessible via NPM
+    volumes:
+      - ./landings:/app/landings
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["uvicorn", "app.web.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    networks:
+      - psychobot-network
+
+  # Telegram Bot
+  bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./landings:/app/landings
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.main"]
+    restart: unless-stopped
+    networks:
+      - psychobot-network
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - psychobot-network
+
+volumes:
+  postgres_data:
+
+networks:
+  psychobot-network:
+    driver: bridge

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block header_title %}Settings{% endblock %}
+{% block title %}Admin Settings{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>⚙️ System Settings</h2>
+    
+    <form id="settingsForm">
+        <h3 style="margin-top: 0;">Availability</h3>
+        <div class="form-group">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" name="availability_on" 
+                       {% if settings.availability_on %}checked{% endif %}
+                       style="width: auto; margin-right: 0.5rem;">
+                <span style="font-weight: normal;">Accept new bookings (when OFF, users see waitlist form)</span>
+            </label>
+        </div>
+        
+        <hr style="margin: 2rem 0;">
+        
+        <h3>💰 Pricing</h3>
+        <div class="form-group">
+            <label>Individual Consultation Price:</label>
+            <input type="text" name="individual_price" 
+                   value="{{ settings.individual_price }}" 
+                   placeholder="e.g., 50 USD / 60 min" required>
+            <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                This text appears on booking buttons
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label>Couple Consultation Price:</label>
+            <input type="text" name="couple_price" 
+                   value="{{ settings.couple_price }}" 
+                   placeholder="e.g., 70 USD / 90 min" required>
+        </div>
+        
+        <hr style="margin: 2rem 0;">
+        
+        <h3>🔔 Reminders</h3>
+        <div class="form-group">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" name="reminder_24h_enabled" 
+                       {% if settings.reminder_24h_enabled %}checked{% endif %}
+                       style="width: auto; margin-right: 0.5rem;">
+                <span style="font-weight: normal;">Send reminder 24 hours before session</span>
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" name="reminder_1h_enabled" 
+                       {% if settings.reminder_1h_enabled %}checked{% endif %}
+                       style="width: auto; margin-right: 0.5rem;">
+                <span style="font-weight: normal;">Send reminder 1 hour before session</span>
+            </label>
+        </div>
+        
+        <hr style="margin: 2rem 0;">
+        
+        <h3>❌ Cancellation Policy</h3>
+        <div class="form-group">
+            <label>Cancellation Window (hours):</label>
+            <input type="number" name="cancel_window_hours" 
+                   value="{{ settings.cancel_window_hours }}" 
+                   min="1" max="72" required>
+            <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                Users cannot self-cancel within this many hours before the session
+            </small>
+        </div>
+        
+        <button type="submit" class="btn btn-success">💾 Save Settings</button>
+    </form>
+    
+    <div id="message" style="margin-top: 1rem;"></div>
+</div>
+
+<div class="card" style="background: #ecf0f1;">
+    <h3 style="margin-top: 0;">ℹ️ Settings Guide</h3>
+    
+    <h4>Availability Toggle</h4>
+    <p>When turned OFF, new users see a waitlist form instead of slot selection. Existing confirmed bookings are unaffected.</p>
+    
+    <h4>Price Display</h4>
+    <p>These strings appear on consultation type buttons in both Telegram and web interfaces. Use format: "XX USD / YY min" for clarity.</p>
+    
+    <h4>Reminders</h4>
+    <p>Automated reminders are sent via Telegram to users with confirmed bookings. Failed delivery attempts are logged and you'll be notified.</p>
+    
+    <h4>Cancellation Window</h4>
+    <p>Prevents last-minute cancellations. Set to 24 hours to require 1 day notice. Users can still request cancellation via admin.</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData();
+    formData.append('availability_on', document.querySelector('[name="availability_on"]').checked);
+    formData.append('individual_price', document.querySelector('[name="individual_price"]').value);
+    formData.append('couple_price', document.querySelector('[name="couple_price"]').value);
+    formData.append('reminder_24h_enabled', document.querySelector('[name="reminder_24h_enabled"]').checked);
+    formData.append('reminder_1h_enabled', document.querySelector('[name="reminder_1h_enabled"]').checked);
+    formData.append('cancel_window_hours', document.querySelector('[name="cancel_window_hours"]').value);
+    
+    const response = await fetch('/admin/settings/update', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const messageDiv = document.getElementById('message');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Settings saved successfully!</div>';
+        setTimeout(() => messageDiv.innerHTML = '', 3000);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to save'}</div>`;
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Psychotherapy Booking{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Welcome to Online Psychotherapy Booking</h2>
+    <p>Book your consultation session quickly and conveniently.</p>
+    
+    <div style="margin-top: 2rem;">
+        <a href="/book?lang=ru" class="btn btn-success" style="margin-right: 1rem;">
+            📅 Book Consultation (Русский)
+        </a>
+        <a href="/book?lang=am" class="btn btn-success">
+            📅 Book Consultation (Հայերեն)
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <h3>How It Works</h3>
+    <ol style="margin-left: 1.5rem;">
+        <li>Select your preferred consultation type and format</li>
+        <li>Choose from available time slots</li>
+        <li>Provide your contact information</li>
+        <li>Receive confirmation via your preferred method</li>
+    </ol>
+</div>
+{% endblock %}

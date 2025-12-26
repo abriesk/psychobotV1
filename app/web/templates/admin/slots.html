@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block header_title %}Slot Management{% endblock %}
+{% block title %}Manage Slots{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>Create New Slot</h2>
+    
+    <form id="createSlotForm">
+        <div class="form-group">
+            <label>Date:</label>
+            <input type="date" name="date" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Start Time:</label>
+            <input type="time" name="start_time" required>
+        </div>
+        
+        <div class="form-group">
+            <label>End Time:</label>
+            <input type="time" name="end_time" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Your Timezone:</label>
+            <select name="timezone" required>
+                <option value="UTC+4">UTC+4 (Yerevan)</option>
+                <option value="UTC+3">UTC+3 (Moscow)</option>
+                <option value="UTC+2">UTC+2 (Kiev)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="is_online" value="true" checked> Online Consultation
+            </label>
+        </div>
+        
+        <button type="submit" class="btn btn-success">Create Slot</button>
+    </form>
+    
+    <div id="createMessage" style="margin-top: 1rem;"></div>
+</div>
+
+<div class="card">
+    <h2>Upcoming Slots</h2>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Start Time (UTC)</th>
+                <th>End Time (UTC)</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for slot in slots %}
+            <tr>
+                <td>{{ slot.id }}</td>
+                <td>{{ slot.start_time.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ slot.end_time.strftime('%H:%M') }}</td>
+                <td>{{ 'Online' if slot.is_online else 'On-site' }}</td>
+                <td>
+                    {% if slot.status.value == 'AVAILABLE' %}
+                        <span style="color: #27ae60;">Available</span>
+                    {% elif slot.status.value == 'HELD' %}
+                        <span style="color: #f39c12;">Held</span>
+                    {% else %}
+                        <span style="color: #e74c3c;">Booked</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if slot.status.value == 'AVAILABLE' %}
+                        <button class="btn btn-danger" onclick="deleteSlot({{ slot.id }})">Delete</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('createSlotForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/admin/slots/create', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const result = await response.json();
+    const messageDiv = document.getElementById('createMessage');
+    
+    if (result.success) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Slot created successfully!</div>';
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        messageDiv.innerHTML = `<div class="alert alert-error">Error: ${result.detail || 'Please try again'}</div>`;
+    }
+});
+
+async function deleteSlot(slotId) {
+    if (!confirm('Are you sure you want to delete this slot?')) return;
+    
+    const response = await fetch(`/admin/slots/${slotId}/delete`, {
+        method: 'POST'
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+        location.reload();
+    } else {
+        alert('Error deleting slot');
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block header_title %}Language Management{% endblock %}
+{% block title %}Add & Manage Languages{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+    <a href="/admin/translations" class="btn">📝 Edit Translations</a>
+</div>
+
+<div class="card">
+    <h2>🌍 Language Management</h2>
+    <p>Add new languages to the booking system. All interface text must be translated.</p>
+    
+    <h3>Current Languages</h3>
+    <div style="margin: 1rem 0;">
+        {% for lang_code in current_languages %}
+        <div style="display: inline-block; background: #3498db; color: white; padding: 0.5rem 1rem; border-radius: 4px; margin-right: 0.5rem; margin-bottom: 0.5rem;">
+            <strong>{{ lang_code.upper() }}</strong>
+            {% if lang_code in language_names %}
+                - {{ language_names[lang_code] }}
+            {% endif %}
+            <span style="margin-left: 0.5rem;">
+                ({{ translation_counts[lang_code] or 0 }} translations)
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card">
+    <h3>➕ Add New Language</h3>
+    
+    <form id="addLanguageForm">
+        <div class="form-group">
+            <label>Language Code (2 letters, lowercase):</label>
+            <input type="text" name="lang_code" pattern="[a-z]{2}" maxlength="2" 
+                   placeholder="e.g., en, de, fr" required>
+            <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                ISO 639-1 code (en=English, de=German, fr=French, es=Spanish, etc.)
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label>Language Display Name:</label>
+            <input type="text" name="lang_name" 
+                   placeholder="e.g., English, Deutsch, Français" required>
+            <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                How this language appears in selectors (can use native script)
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label>Initialize From (optional):</label>
+            <select name="clone_from">
+                <option value="">-- Start with empty translations --</option>
+                {% for lang_code in current_languages %}
+                <option value="{{ lang_code }}">Clone from {{ lang_code.upper() }}</option>
+                {% endfor %}
+            </select>
+            <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                Copy translations from existing language as starting point (you can edit after)
+            </small>
+        </div>
+        
+        <button type="submit" class="btn btn-success">Add Language</button>
+    </form>
+    
+    <div id="addLanguageMessage" style="margin-top: 1rem;"></div>
+</div>
+
+<div class="card" style="background: #fff3cd; border: 1px solid #ffc107;">
+    <h3 style="margin-top: 0;">⚠️ Important: Required Translation Keys</h3>
+    <p>When adding a new language, you must translate these keys ({{ required_keys|length }} total):</p>
+    
+    <div style="max-height: 300px; overflow-y: auto; background: white; padding: 1rem; border-radius: 4px; margin-top: 1rem;">
+        <table style="font-size: 0.9rem;">
+            <thead>
+                <tr>
+                    <th>Key</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for key in required_keys %}
+                <tr>
+                    <td><code>{{ key }}</code></td>
+                    <td style="color: #7f8c8d; font-size: 0.85rem;">
+                        {% if 'menu_' in key %}
+                            Main menu button
+                        {% elif 'btn_' in key %}
+                            Button text
+                        {% elif 'ask_' in key %}
+                            Question/prompt
+                        {% elif 'welcome' in key %}
+                            Welcome message
+                        {% else %}
+                            System message
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <p style="margin-top: 1rem;">
+        💡 <strong>Tip:</strong> Select "Clone from" to copy existing translations, then edit them via 
+        <a href="/admin/translations" style="color: #2980b9;">Translation Editor</a>
+    </p>
+</div>
+
+<div class="card">
+    <h3>🔧 Bulk Translation Entry</h3>
+    <p>After adding a language, use this form to quickly enter all translations:</p>
+    
+    <form id="bulkTranslationForm">
+        <div class="form-group">
+            <label>Target Language:</label>
+            <select name="target_lang" id="targetLang" required>
+                <option value="">-- Select Language --</option>
+                {% for lang_code in current_languages %}
+                <option value="{{ lang_code }}">{{ lang_code.upper() }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <button type="button" onclick="loadBulkEditor()" class="btn">
+            Load Translation Editor
+        </button>
+    </form>
+    
+    <!-- Bulk editor (loaded dynamically) -->
+    <div id="bulkEditor" style="display: none; margin-top: 1.5rem;">
+        <h4>Translate All Keys</h4>
+        <form id="bulkTranslationSubmit">
+            <input type="hidden" name="lang" id="bulkLang">
+            <div id="translationFields"></div>
+            <button type="submit" class="btn btn-success" style="margin-top: 1rem;">
+                💾 Save All Translations
+            </button>
+        </form>
+        <div id="bulkMessage" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Add language form
+document.getElementById('addLanguageForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/admin/languages/add', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const messageDiv = document.getElementById('addLanguageMessage');
+    
+    if (response.ok) {
+        const result = await response.json();
+        messageDiv.innerHTML = `
+            <div class="alert alert-success">
+                ✅ Language added successfully!<br>
+                <strong>${result.lang_code.toUpperCase()}</strong> - ${result.translations_added} translations created<br>
+                <a href="/admin/translations?lang=${result.lang_code}" class="btn" style="margin-top: 0.5rem;">
+                    Edit Translations
+                </a>
+            </div>
+        `;
+        setTimeout(() => location.reload(), 3000);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail}</div>`;
+    }
+});
+
+// Load bulk translation editor
+async function loadBulkEditor() {
+    const langSelect = document.getElementById('targetLang');
+    const lang = langSelect.value;
+    
+    if (!lang) {
+        alert('Please select a language');
+        return;
+    }
+    
+    const response = await fetch(`/admin/languages/get-keys?lang=${lang}`);
+    if (!response.ok) {
+        alert('Failed to load translation keys');
+        return;
+    }
+    
+    const data = await response.json();
+    const fieldsContainer = document.getElementById('translationFields');
+    document.getElementById('bulkLang').value = lang;
+    
+    fieldsContainer.innerHTML = '';
+    
+    data.keys.forEach(item => {
+        const fieldGroup = document.createElement('div');
+        fieldGroup.className = 'form-group';
+        fieldGroup.innerHTML = `
+            <label>
+                <strong>${item.key}</strong>
+                ${item.current_value ? `<br><small style="color: #7f8c8d;">Current: ${item.current_value}</small>` : ''}
+            </label>
+            <input type="text" 
+                   name="translation_${item.key}" 
+                   value="${item.current_value || ''}" 
+                   placeholder="Enter translation for ${item.key}"
+                   required>
+        `;
+        fieldsContainer.appendChild(fieldGroup);
+    });
+    
+    document.getElementById('bulkEditor').style.display = 'block';
+    document.getElementById('bulkEditor').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Bulk translation submit
+document.getElementById('bulkTranslationSubmit').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const lang = document.getElementById('bulkLang').value;
+    
+    // Build translations object
+    const translations = {};
+    for (let [key, value] of formData.entries()) {
+        if (key.startsWith('translation_')) {
+            const translationKey = key.replace('translation_', '');
+            translations[translationKey] = value;
+        }
+    }
+    
+    const response = await fetch('/admin/languages/bulk-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lang, translations })
+    });
+    
+    const messageDiv = document.getElementById('bulkMessage');
+    
+    if (response.ok) {
+        const result = await response.json();
+        messageDiv.innerHTML = `
+            <div class="alert alert-success">
+                ✅ ${result.updated_count} translations saved successfully!
+            </div>
+        `;
+        
+        // Reload translations cache
+        await fetch('/admin/languages/reload-cache', { method: 'POST' });
+        
+        setTimeout(() => location.reload(), 2000);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail}</div>`;
+    }
+});
+</script>
+{% endblock %}

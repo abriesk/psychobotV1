@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block header_title %}Translation Editor{% endblock %}
+{% block title %}Edit Translations{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+    <a href="/admin/languages" class="btn btn-success">➕ Add Language</a>
+</div>
+
+<div class="card">
+    <h2>📝 Translation Editor</h2>
+    <p>Edit interface text for buttons, messages, and prompts shown to users.</p>
+    
+    <!-- Language Selector -->
+    <div class="form-group">
+        <label>Language:</label>
+        <select id="langSelector" onchange="changeLanguage(this.value)">
+            {% for lang in languages %}
+            <option value="{{ lang }}" {% if lang == current_lang %}selected{% endif %}>
+                {{ lang.upper() }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Translations for {{ current_lang.upper() }}</h3>
+    <p style="color: #7f8c8d; margin-bottom: 1.5rem;">
+        Found {{ translations|length }} translations. Edit values below and save.
+    </p>
+    
+    {% if translations %}
+        <form id="translationsForm">
+            <input type="hidden" name="lang" value="{{ current_lang }}">
+            
+            <div style="display: grid; gap: 1rem;">
+                {% for trans in translations %}
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; border-left: 3px solid #3498db;">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                        <strong style="color: #2c3e50; font-family: monospace;">{{ trans.key }}</strong>
+                        <button type="button" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" 
+                                onclick="saveTranslation('{{ trans.key }}', '{{ current_lang }}')">
+                            💾 Save
+                        </button>
+                    </div>
+                    
+                    <textarea id="trans_{{ trans.key }}" 
+                              name="translation_{{ trans.key }}"
+                              rows="2" 
+                              style="width: 100%; font-size: 0.95rem;"
+                              onchange="markChanged('{{ trans.key }}')"
+                    >{{ trans.value }}</textarea>
+                    
+                    <div id="status_{{ trans.key }}" style="margin-top: 0.5rem; font-size: 0.85rem;"></div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div style="position: sticky; bottom: 20px; background: white; padding: 1rem; margin-top: 2rem; border-top: 2px solid #ecf0f1; text-align: center;">
+                <button type="button" onclick="saveAllTranslations()" class="btn btn-success" style="font-size: 1.1rem;">
+                    💾 Save All Changes
+                </button>
+                <span id="globalStatus" style="margin-left: 1rem; font-weight: bold;"></span>
+            </div>
+        </form>
+    {% else %}
+        <div class="alert alert-error">
+            No translations found for {{ current_lang }}. 
+            <a href="/admin/languages" class="btn" style="margin-left: 1rem;">Add Language</a>
+        </div>
+    {% endif %}
+</div>
+
+<div class="card" style="background: #fff3cd; border: 1px solid #ffc107;">
+    <h3 style="margin-top: 0;">💡 Translation Tips</h3>
+    
+    <h4>Special Variables</h4>
+    <p>Some translations contain variables that will be replaced with actual values:</p>
+    <ul style="font-family: monospace; font-size: 0.9rem;">
+        <li><code>{price}</code> - Will be replaced with actual price</li>
+        <li><code>{time}</code> - Will be replaced with confirmed time</li>
+        <li><code>{msg}</code> - Will be replaced with message content</li>
+    </ul>
+    <p style="color: #856404;"><strong>Important:</strong> Keep these variables in your translation!</p>
+    
+    <h4>HTML Tags (Telegram)</h4>
+    <p>Telegram only supports these HTML tags:</p>
+    <ul style="font-family: monospace; font-size: 0.9rem;">
+        <li><code>&lt;b&gt;bold&lt;/b&gt;</code></li>
+        <li><code>&lt;i&gt;italic&lt;/i&gt;</code></li>
+        <li><code>&lt;u&gt;underline&lt;/u&gt;</code></li>
+        <li><code>&lt;code&gt;monospace&lt;/code&gt;</code></li>
+        <li><code>&lt;a href="url"&gt;link&lt;/a&gt;</code></li>
+    </ul>
+    
+    <h4>Key Categories</h4>
+    <ul>
+        <li><code>menu_*</code> - Main menu buttons</li>
+        <li><code>btn_*</code> - Button labels</li>
+        <li><code>ask_*</code> - Questions/prompts to users</li>
+        <li><code>*_sent</code> - Confirmation messages</li>
+        <li><code>negotiation_*</code> - Booking negotiation flow</li>
+    </ul>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Track changed translations
+const changedKeys = new Set();
+
+function markChanged(key) {
+    changedKeys.add(key);
+    document.getElementById(`status_${key}`).innerHTML = 
+        '<span style="color: #f39c12;">⚠️ Unsaved changes</span>';
+}
+
+// Change language
+function changeLanguage(lang) {
+    window.location.href = `/admin/translations?lang=${lang}`;
+}
+
+// Save single translation
+async function saveTranslation(key, lang) {
+    const value = document.getElementById(`trans_${key}`).value;
+    const statusDiv = document.getElementById(`status_${key}`);
+    
+    statusDiv.innerHTML = '<span style="color: #7f8c8d;">💾 Saving...</span>';
+    
+    const formData = new FormData();
+    formData.append('lang', lang);
+    formData.append('key', key);
+    formData.append('value', value);
+    
+    try {
+        const response = await fetch('/admin/translations/update', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            statusDiv.innerHTML = '<span style="color: #27ae60;">✅ Saved</span>';
+            changedKeys.delete(key);
+            setTimeout(() => {
+                statusDiv.innerHTML = '';
+            }, 2000);
+        } else {
+            const error = await response.json();
+            statusDiv.innerHTML = `<span style="color: #e74c3c;">❌ Error: ${error.detail}</span>`;
+        }
+    } catch (err) {
+        statusDiv.innerHTML = `<span style="color: #e74c3c;">❌ Network error</span>`;
+    }
+}
+
+// Save all translations
+async function saveAllTranslations() {
+    const form = document.getElementById('translationsForm');
+    const formData = new FormData(form);
+    const lang = formData.get('lang');
+    const globalStatus = document.getElementById('globalStatus');
+    
+    globalStatus.innerHTML = '<span style="color: #3498db;">💾 Saving all translations...</span>';
+    
+    let saved = 0;
+    let errors = 0;
+    
+    // Get all translation fields
+    const translations = document.querySelectorAll('[name^="translation_"]');
+    
+    for (const field of translations) {
+        const key = field.name.replace('translation_', '');
+        const value = field.value;
+        
+        const singleFormData = new FormData();
+        singleFormData.append('lang', lang);
+        singleFormData.append('key', key);
+        singleFormData.append('value', value);
+        
+        try {
+            const response = await fetch('/admin/translations/update', {
+                method: 'POST',
+                body: singleFormData
+            });
+            
+            if (response.ok) {
+                saved++;
+                const statusDiv = document.getElementById(`status_${key}`);
+                if (statusDiv) {
+                    statusDiv.innerHTML = '<span style="color: #27ae60;">✅ Saved</span>';
+                }
+            } else {
+                errors++;
+            }
+        } catch (err) {
+            errors++;
+        }
+    }
+    
+    changedKeys.clear();
+    
+    if (errors === 0) {
+        globalStatus.innerHTML = `<span style="color: #27ae60;">✅ All ${saved} translations saved!</span>`;
+    } else {
+        globalStatus.innerHTML = `<span style="color: #f39c12;">⚠️ ${saved} saved, ${errors} errors</span>`;
+    }
+    
+    // Clear status after 3 seconds
+    setTimeout(() => {
+        document.querySelectorAll('[id^="status_"]').forEach(div => {
+            div.innerHTML = '';
+        });
+    }, 2000);
+    
+    setTimeout(() => {
+        globalStatus.innerHTML = '';
+    }, 5000);
+}
+
+// Warn on leave if unsaved changes
+window.addEventListener('beforeunload', (e) => {
+    if (changedKeys.size > 0) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+    }
+});
+</script>
+{% endblock %}

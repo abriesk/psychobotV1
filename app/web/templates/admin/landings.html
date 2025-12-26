@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block header_title %}Landing Pages{% endblock %}
+{% block title %}Manage Landings{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>📄 Landing Pages</h2>
+    <p>Manage HTML content shown to users when they click menu buttons in Telegram or web interface.</p>
+    
+    <div style="margin: 1.5rem 0;">
+        <button onclick="showUploadForm()" class="btn btn-success">➕ Upload New Landing</button>
+    </div>
+    
+    <!-- Upload Form (hidden by default) -->
+    <div id="uploadForm" style="display: none; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
+        <h3 style="margin-top: 0;">Upload New Landing</h3>
+        <form id="landingUploadForm">
+            <div class="form-group">
+                <label>Topic:</label>
+                <select name="topic" required>
+                    <option value="">-- Select Topic --</option>
+                    <option value="work_terms">Work Terms (Условия работы)</option>
+                    <option value="qualification">Qualification (Квалификация)</option>
+                    <option value="about_psychotherapy">About Psychotherapy (О психотерапии)</option>
+                    <option value="references">References (Рекомендации)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Language:</label>
+                <select name="lang" required>
+                    <option value="">-- Select Language --</option>
+                    {% for lang_code, lang_name in languages.items() %}
+                    <option value="{{ lang_code }}">{{ lang_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Content (HTML):</label>
+                <textarea name="content" rows="15" required 
+                          placeholder="Enter HTML content. Supported tags: <b>, <i>, <u>, <a>, <code>, <pre>"></textarea>
+                <small style="color: #7f8c8d; display: block; margin-top: 0.5rem;">
+                    ⚠️ <b>Important:</b> Telegram only supports: &lt;b&gt;, &lt;i&gt;, &lt;u&gt;, &lt;a href=""&gt;, &lt;code&gt;, &lt;pre&gt;
+                    <br>Max length: 4000 characters
+                </small>
+            </div>
+            
+            <button type="submit" class="btn btn-success">💾 Save Landing</button>
+            <button type="button" onclick="hideUploadForm()" class="btn">Cancel</button>
+        </form>
+        <div id="uploadMessage" style="margin-top: 1rem;"></div>
+    </div>
+    
+    <!-- Existing Landings Table -->
+    <h3>Existing Landing Pages</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Topic</th>
+                <th>Language</th>
+                <th>File Size</th>
+                <th>Last Modified</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if landings %}
+                {% for landing in landings %}
+                <tr>
+                    <td>{{ landing.topic_display }}</td>
+                    <td>{{ landing.lang_display }}</td>
+                    <td>{{ landing.size }} chars</td>
+                    <td>{{ landing.modified }}</td>
+                    <td>
+                        <button class="btn" onclick="editLanding('{{ landing.topic }}', '{{ landing.lang }}')">
+                            ✏️ Edit
+                        </button>
+                        <button class="btn" onclick="previewLanding('{{ landing.topic }}', '{{ landing.lang }}')">
+                            👁️ Preview
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteLanding('{{ landing.topic }}', '{{ landing.lang }}')">
+                            🗑️ Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center; color: #7f8c8d;">
+                        No landing pages found. Upload your first one above!
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Edit Modal -->
+<div id="editModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 8px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto;">
+        <h2>Edit Landing Page</h2>
+        <form id="editForm">
+            <input type="hidden" name="topic" id="editTopic">
+            <input type="hidden" name="lang" id="editLang">
+            
+            <div class="form-group">
+                <label>Content:</label>
+                <textarea name="content" id="editContent" rows="20" required></textarea>
+            </div>
+            
+            <button type="submit" class="btn btn-success">💾 Save Changes</button>
+            <button type="button" onclick="closeEditModal()" class="btn">Cancel</button>
+        </form>
+        <div id="editMessage" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+<!-- Preview Modal -->
+<div id="previewModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 8px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto;">
+        <h2>Landing Preview</h2>
+        <div id="previewContent" style="border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; background: #f8f9fa;"></div>
+        <button type="button" onclick="closePreviewModal()" class="btn">Close</button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Upload form toggle
+function showUploadForm() {
+    document.getElementById('uploadForm').style.display = 'block';
+}
+
+function hideUploadForm() {
+    document.getElementById('uploadForm').style.display = 'none';
+    document.getElementById('landingUploadForm').reset();
+    document.getElementById('uploadMessage').innerHTML = '';
+}
+
+// Upload handler
+document.getElementById('landingUploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/admin/landings/upload', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const messageDiv = document.getElementById('uploadMessage');
+    
+    if (response.ok) {
+        const result = await response.json();
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Landing saved successfully!</div>';
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to save'}</div>`;
+    }
+});
+
+// Edit landing
+async function editLanding(topic, lang) {
+    const response = await fetch(`/admin/landings/get?topic=${topic}&lang=${lang}`);
+    if (!response.ok) {
+        alert('Failed to load landing');
+        return;
+    }
+    
+    const data = await response.json();
+    document.getElementById('editTopic').value = topic;
+    document.getElementById('editLang').value = lang;
+    document.getElementById('editContent').value = data.content;
+    document.getElementById('editModal').style.display = 'block';
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+    document.getElementById('editForm').reset();
+    document.getElementById('editMessage').innerHTML = '';
+}
+
+// Edit form handler
+document.getElementById('editForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/admin/landings/update', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const messageDiv = document.getElementById('editMessage');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Changes saved!</div>';
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail}</div>`;
+    }
+});
+
+// Preview landing
+async function previewLanding(topic, lang) {
+    const response = await fetch(`/admin/landings/get?topic=${topic}&lang=${lang}`);
+    if (!response.ok) {
+        alert('Failed to load landing');
+        return;
+    }
+    
+    const data = await response.json();
+    document.getElementById('previewContent').innerHTML = data.content;
+    document.getElementById('previewModal').style.display = 'block';
+}
+
+function closePreviewModal() {
+    document.getElementById('previewModal').style.display = 'none';
+}
+
+// Delete landing
+async function deleteLanding(topic, lang) {
+    if (!confirm(`Delete landing: ${topic}_${lang}?`)) return;
+    
+    const response = await fetch(`/admin/landings/delete?topic=${topic}&lang=${lang}`, {
+        method: 'POST'
+    });
+    
+    if (response.ok) {
+        location.reload();
+    } else {
+        alert('Failed to delete landing');
+    }
+}
+</script>
+{% endblock %}

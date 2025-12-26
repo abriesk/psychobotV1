@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block header_title %}Booking Requests{% endblock %}
+{% block title %}Manage Requests{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>Booking Requests</h2>
+    
+    <div style="margin-bottom: 1rem;">
+        <a href="/admin/requests" class="btn">All</a>
+        <a href="/admin/requests?status=pending" class="btn">Pending</a>
+        <a href="/admin/requests?status=confirmed" class="btn">Confirmed</a>
+        <a href="/admin/requests?status=rejected" class="btn">Rejected</a>
+    </div>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>UUID</th>
+                <th>Type</th>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for req in requests %}
+            <tr>
+                <td><code>{{ req.request_uuid[:8] }}</code></td>
+                <td>{{ req.type.value }}</td>
+                <td>{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    {% if req.status.value == 'PENDING' %}
+                        <span style="color: #f39c12;">Pending</span>
+                    {% elif req.status.value == 'CONFIRMED' %}
+                        <span style="color: #27ae60;">Confirmed</span>
+                    {% elif req.status.value == 'REJECTED' %}
+                        <span style="color: #e74c3c;">Rejected</span>
+                    {% else %}
+                        {{ req.status.value }}
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="/admin/requests/{{ req.id }}" class="btn">View</a>
+                    {% if req.status.value == 'PENDING' %}
+                        <button class="btn btn-success" onclick="approveRequest({{ req.id }})">Approve</button>
+                        <button class="btn btn-danger" onclick="rejectRequest({{ req.id }})">Reject</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function approveRequest(reqId) {
+    if (!confirm('Approve this booking request?')) return;
+    
+    const response = await fetch(`/admin/requests/${reqId}/approve`, {
+        method: 'POST'
+    });
+    
+    if (response.ok) {
+        location.reload();
+    }
+}
+
+async function rejectRequest(reqId) {
+    if (!confirm('Reject this booking request?')) return;
+    
+    const response = await fetch(`/admin/requests/${reqId}/reject`, {
+        method: 'POST'
+    });
+    
+    if (response.ok) {
+        location.reload();
+    }
+}
+</script>
+{% endblock %}
