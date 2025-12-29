@@ -1,11 +1,8 @@
-# Psychotherapy Booking Bot
+# Psychotherapy Booking Bot V1.0 (In work curently)
 
-Telegram bot for psychotherapists to manage client bookings: online/onsite, individual/couple sessions, time negotiation, waitlist, and admin tools. Supports Russian and Armenian out of the box.
+Telegram bot for psychotherapists to manage client bookings: online/onsite, individual/couple sessions, time negotiation, waitlist, and admin tools. Now with webUI for clients and admin. NPM to register your domain and request certificate. Added ability to add aditional languages from web admin UI.
 
-Version: **0.8** (pre-release, stable and usable)
-
-Perfect for solo practitioners who want a simple, professional booking flow directly in Telegram without third-party calendars.
-
+(foloowing description right now copy-pasted from v0.8)
 ## Features
 
 - Multi-language interface (Russian + Armenian, easy to extend)
