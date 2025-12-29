@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block header_title %}Request Details{% endblock %}
+{% block title %}Request #{{ booking.id }}{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin/requests" class="btn">← Back to Requests</a>
+    <a href="/admin" class="btn">Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>📋 Request Details</h2>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem;">
+        <div>
+            <strong>UUID:</strong><br>
+            <code style="font-size: 0.9rem;">{{ booking.request_uuid }}</code>
+        </div>
+        <div>
+            <strong>Status:</strong><br>
+            {% if booking.status.value == 'PENDING' %}
+                <span style="color: #f39c12; font-weight: bold;">⏳ Pending</span>
+            {% elif booking.status.value == 'NEGOTIATING' %}
+                <span style="color: #3498db; font-weight: bold;">💬 Negotiating</span>
+            {% elif booking.status.value == 'CONFIRMED' %}
+                <span style="color: #27ae60; font-weight: bold;">✅ Confirmed</span>
+            {% elif booking.status.value == 'REJECTED' %}
+                <span style="color: #e74c3c; font-weight: bold;">❌ Rejected</span>
+            {% elif booking.status.value == 'CANCELED' %}
+                <span style="color: #95a5a6; font-weight: bold;">🚫 Canceled</span>
+            {% else %}
+                {{ booking.status.value }}
+            {% endif %}
+        </div>
+        <div>
+            <strong>Type:</strong><br>
+            {{ booking.type.value | capitalize }}
+        </div>
+        <div>
+            <strong>User ID:</strong><br>
+            {{ booking.user_id }}
+        </div>
+        <div>
+            <strong>Created:</strong><br>
+            {{ booking.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
+        </div>
+        <div>
+            <strong>Updated:</strong><br>
+            {{ booking.updated_at.strftime('%Y-%m-%d %H:%M UTC') if booking.updated_at else 'N/A' }}
+        </div>
+    </div>
+    
+    <hr style="margin: 1.5rem 0;">
+    
+    <h3>📝 Request Information</h3>
+    <div style="background: #f8f9fa; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+        <p><strong>Timezone:</strong> {{ booking.timezone or 'Not specified' }}</p>
+        <p><strong>Desired Time:</strong> {{ booking.desired_time or 'Not specified' }}</p>
+        <p><strong>Final Time:</strong> {{ booking.final_time or 'Not yet confirmed' }}</p>
+        <p><strong>Preferred Contact:</strong> {{ booking.preferred_comm or 'Not specified' }}</p>
+    </div>
+    
+    <div style="background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 4px solid #ffc107;">
+        <strong>Problem/Description:</strong>
+        <p style="margin-top: 0.5rem; white-space: pre-wrap;">{{ booking.problem or 'No description provided' }}</p>
+    </div>
+    
+    {% if slot %}
+    <hr style="margin: 1.5rem 0;">
+    
+    <h3>📅 Linked Slot</h3>
+    <div style="background: #e8f4f8; padding: 1rem; border-radius: 4px; border-left: 4px solid #3498db;">
+        <p><strong>Slot ID:</strong> {{ slot.id }}</p>
+        <p><strong>Start:</strong> {{ slot.start_time.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+        <p><strong>End:</strong> {{ slot.end_time.strftime('%H:%M UTC') }}</p>
+        <p><strong>Type:</strong> {{ 'Online' if slot.is_online else 'On-site' }}</p>
+        <p><strong>Status:</strong> {{ slot.status.value }}</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>💬 Negotiation History</h3>
+    
+    {% if history %}
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+            {% for msg in history %}
+            <div style="padding: 1rem; border-radius: 8px; 
+                        {% if msg.sender.value == 'ADMIN' %}
+                            background: #d4edda; border-left: 4px solid #27ae60;
+                        {% else %}
+                            background: #cce5ff; border-left: 4px solid #3498db;
+                        {% endif %}">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <strong>
+                        {% if msg.sender.value == 'ADMIN' %}
+                            🧑‍⚕️ Admin
+                        {% else %}
+                            👤 Client
+                        {% endif %}
+                    </strong>
+                    <span style="color: #7f8c8d; font-size: 0.85rem;">
+                        {{ msg.timestamp.strftime('%Y-%m-%d %H:%M') }}
+                    </span>
+                </div>
+                <p style="margin: 0; white-space: pre-wrap;">{{ msg.message }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p style="color: #7f8c8d; text-align: center; padding: 2rem;">
+            No negotiation messages yet.
+        </p>
+    {% endif %}
+</div>
+
+{% if booking.status.value in ['PENDING', 'NEGOTIATING'] %}
+<div class="card">
+    <h3>⚡ Actions</h3>
+    
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <button onclick="approveRequest({{ booking.id }})" class="btn btn-success">
+            ✅ Approve Request
+        </button>
+        <button onclick="rejectRequest({{ booking.id }})" class="btn btn-danger">
+            ❌ Reject Request
+        </button>
+    </div>
+    
+    <div id="actionMessage" style="margin-top: 1rem;"></div>
+</div>
+{% endif %}
+
+{% if booking.reminder_24h_sent or booking.reminder_1h_sent %}
+<div class="card" style="background: #f8f9fa;">
+    <h3>🔔 Reminder Status</h3>
+    <p>24h Reminder: {{ '✅ Sent' if booking.reminder_24h_sent else '❌ Not sent' }}</p>
+    <p>1h Reminder: {{ '✅ Sent' if booking.reminder_1h_sent else '❌ Not sent' }}</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function approveRequest(reqId) {
+    if (!confirm('Approve this booking request?')) return;
+    
+    const response = await fetch(`/admin/requests/${reqId}/approve`, {
+        method: 'POST'
+    });
+    
+    const messageDiv = document.getElementById('actionMessage');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Request approved successfully!</div>';
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to approve'}</div>`;
+    }
+}
+
+async function rejectRequest(reqId) {
+    if (!confirm('Reject this booking request?')) return;
+    
+    const response = await fetch(`/admin/requests/${reqId}/reject`, {
+        method: 'POST'
+    });
+    
+    const messageDiv = document.getElementById('actionMessage');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">Request rejected.</div>';
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to reject'}</div>`;
+    }
+}
+</script>
+{% endblock %}
