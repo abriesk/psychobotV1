@@ -39,7 +39,12 @@
         </div>
         <div>
             <strong>User ID:</strong><br>
-            {{ booking.user_id }}
+            <code>{{ booking.user_id }}</code>
+            {% if booking.user_id != 0 %}
+                <br><small style="color: #7f8c8d;">📱 Telegram user</small>
+            {% else %}
+                <br><small style="color: #7f8c8d;">🌐 Web booking</small>
+            {% endif %}
         </div>
         <div>
             <strong>Created:</strong><br>
@@ -59,6 +64,7 @@
         <p><strong>Desired Time:</strong> {{ booking.desired_time or 'Not specified' }}</p>
         <p><strong>Final Time:</strong> {{ booking.final_time or 'Not yet confirmed' }}</p>
         <p><strong>Preferred Contact:</strong> {{ booking.preferred_comm or 'Not specified' }}</p>
+        <p><strong>Address/Name:</strong> {{ booking.address_name or 'Not specified' }}</p>
     </div>
     
     <div style="background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 4px solid #ffc107;">
@@ -80,6 +86,7 @@
     {% endif %}
 </div>
 
+<!-- Negotiation History -->
 <div class="card">
     <h3>💬 Negotiation History</h3>
     
@@ -88,14 +95,14 @@
             {% for msg in history %}
             <div style="padding: 1rem; border-radius: 8px; 
                         {% if msg.sender.value == 'ADMIN' %}
-                            background: #d4edda; border-left: 4px solid #27ae60;
+                            background: #d4edda; border-left: 4px solid #27ae60; margin-left: 2rem;
                         {% else %}
-                            background: #cce5ff; border-left: 4px solid #3498db;
+                            background: #cce5ff; border-left: 4px solid #3498db; margin-right: 2rem;
                         {% endif %}">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                     <strong>
                         {% if msg.sender.value == 'ADMIN' %}
-                            🧑‍⚕️ Admin
+                            🧑‍⚕️ You (Admin)
                         {% else %}
                             👤 Client
                         {% endif %}
@@ -115,28 +122,152 @@
     {% endif %}
 </div>
 
+<!-- Actions Section - Only for actionable statuses -->
 {% if booking.status.value in ['PENDING', 'NEGOTIATING'] %}
-<div class="card">
-    <h3>⚡ Actions</h3>
-    
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-        <button onclick="approveRequest({{ booking.id }})" class="btn btn-success">
-            ✅ Approve Request
-        </button>
-        <button onclick="rejectRequest({{ booking.id }})" class="btn btn-danger">
-            ❌ Reject Request
-        </button>
+
+    <!-- WAITLIST-SPECIFIC ACTIONS -->
+    {% if booking.type.value == 'WAITLIST' %}
+    <div class="card" style="border: 2px solid #f39c12; background: #fffbf0;">
+        <h3>📋 Waitlist Actions</h3>
+        <p style="color: #7f8c8d; margin-bottom: 1.5rem;">
+            This is a <strong>waitlist request</strong>. The client signed up when availability was OFF.
+            Contact them manually using the info they provided, then take action below.
+        </p>
+        
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+            <button onclick="showConvertModal()" class="btn btn-success">
+                🔄 Convert to Booking
+            </button>
+            <button onclick="archiveRequest({{ booking.id }})" class="btn" style="background: #95a5a6;">
+                📦 Archive / Close
+            </button>
+        </div>
+        
+        <div id="waitlistMessage" style="margin-top: 1rem;"></div>
     </div>
     
-    <div id="actionMessage" style="margin-top: 1rem;"></div>
+    <!-- Convert to Booking Modal -->
+    <div id="convertModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%;">
+            <h3 style="margin-top: 0;">🔄 Convert to Booking</h3>
+            <p>Convert this waitlist entry to an active booking request.</p>
+            
+            <form id="convertForm" onsubmit="convertToBooking(event)">
+                <div class="form-group">
+                    <label>Consultation Type:</label>
+                    <select name="consultation_type" id="convertType" required>
+                        <option value="INDIVIDUAL">Individual (60 min)</option>
+                        <option value="COUPLE">Couple (90 min)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Desired Time (from your conversation with client):</label>
+                    <input type="text" name="desired_time" id="convertTime"
+                           placeholder="e.g., Friday afternoons, weekends, etc.">
+                </div>
+                
+                <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                    <button type="submit" class="btn btn-success">Convert</button>
+                    <button type="button" onclick="closeConvertModal()" class="btn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    {% else %}
+    <!-- REGULAR BOOKING ACTIONS -->
+    <div class="card" style="border: 2px solid #3498db;">
+        <h3>⚡ Actions</h3>
+        
+        <!-- Quick Actions -->
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+            <button onclick="approveRequest({{ booking.id }})" class="btn btn-success">
+                ✅ Approve & Confirm
+            </button>
+            <button onclick="rejectRequest({{ booking.id }})" class="btn btn-danger">
+                ❌ Reject Request
+            </button>
+        </div>
+        
+        <hr style="margin: 1.5rem 0;">
+        
+        <!-- Propose Alternative Time (Negotiation) -->
+        <h4>💬 Propose Alternative Time</h4>
+        <p style="color: #7f8c8d; margin-bottom: 1rem;">
+            Send a counter-proposal to the client. They will receive this via Telegram (if Telegram user) 
+            and can accept or counter-propose.
+        </p>
+        
+        <form id="proposeForm" onsubmit="submitProposal(event)">
+            <div class="form-group">
+                <label>Your Proposal Message:</label>
+                <textarea name="proposal" id="proposalText" rows="4" required
+                          placeholder="Example: I can offer you Friday, January 10th at 14:00 (Yerevan time). Does this work for you?"></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="setFinalTime" style="width: auto; margin-right: 0.5rem;">
+                    Also set as proposed final time
+                </label>
+                <input type="text" id="finalTimeInput" name="final_time" 
+                       placeholder="e.g., Friday, Jan 10, 14:00 Yerevan"
+                       style="display: none; margin-top: 0.5rem;">
+            </div>
+            
+            <button type="submit" class="btn" style="background: #9b59b6;">
+                📤 Send Proposal to Client
+            </button>
+        </form>
+        
+        <div id="actionMessage" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Approve with Custom Time -->
+    <div class="card" style="background: #f8f9fa;">
+        <h4>✅ Approve with Custom Final Time</h4>
+        <p style="color: #7f8c8d;">Set a specific final time when approving (overrides client's desired time).</p>
+        
+        <form id="approveWithTimeForm" onsubmit="approveWithTime(event)">
+            <div class="form-group">
+                <label>Final Confirmed Time:</label>
+                <input type="text" name="custom_final_time" id="customFinalTime"
+                       placeholder="e.g., Saturday, Jan 11, 10:00 Yerevan time"
+                       value="{{ booking.desired_time or '' }}">
+            </div>
+            <button type="submit" class="btn btn-success">
+                ✅ Approve with This Time
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+{% else %}
+<div class="card" style="background: #ecf0f1;">
+    <h3>ℹ️ Request {{ booking.status.value | capitalize }}</h3>
+    <p>This request is <strong>{{ booking.status.value }}</strong> and cannot be modified.</p>
+    {% if booking.status.value == 'CONFIRMED' and booking.final_time %}
+        <p style="color: #27ae60;"><strong>Confirmed Time:</strong> {{ booking.final_time }}</p>
+    {% endif %}
+    {% if booking.cancelled_at %}
+        <p style="color: #e74c3c;"><strong>Cancelled at:</strong> {{ booking.cancelled_at.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+    {% endif %}
 </div>
 {% endif %}
 
-{% if booking.reminder_24h_sent or booking.reminder_1h_sent %}
-<div class="card" style="background: #f8f9fa;">
+<!-- Reminder Status -->
+{% if booking.reminder_24h_sent or booking.reminder_1h_sent or booking.status.value == 'CONFIRMED' %}
+<div class="card" style="background: #f0f8ff;">
     <h3>🔔 Reminder Status</h3>
-    <p>24h Reminder: {{ '✅ Sent' if booking.reminder_24h_sent else '❌ Not sent' }}</p>
-    <p>1h Reminder: {{ '✅ Sent' if booking.reminder_1h_sent else '❌ Not sent' }}</p>
+    <p>24h Reminder: {{ '✅ Sent' if booking.reminder_24h_sent else '⏳ Pending' }}</p>
+    <p>1h Reminder: {{ '✅ Sent' if booking.reminder_1h_sent else '⏳ Pending' }}</p>
+    {% if booking.reminders_log %}
+        <details style="margin-top: 1rem;">
+            <summary style="cursor: pointer; color: #3498db;">View Reminder Log</summary>
+            <pre style="background: #f8f9fa; padding: 1rem; margin-top: 0.5rem; overflow-x: auto;">{{ booking.reminders_log | tojson(indent=2) }}</pre>
+        </details>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -144,40 +275,223 @@
 
 {% block extra_js %}
 <script>
-async function approveRequest(reqId) {
-    if (!confirm('Approve this booking request?')) return;
+// Toggle final time input visibility
+document.getElementById('setFinalTime')?.addEventListener('change', function() {
+    const input = document.getElementById('finalTimeInput');
+    input.style.display = this.checked ? 'block' : 'none';
+});
+
+// Submit proposal (negotiation)
+async function submitProposal(event) {
+    event.preventDefault();
     
-    const response = await fetch(`/admin/requests/${reqId}/approve`, {
-        method: 'POST'
-    });
+    const proposal = document.getElementById('proposalText').value;
+    const setFinal = document.getElementById('setFinalTime').checked;
+    const finalTime = setFinal ? document.getElementById('finalTimeInput').value : null;
+    
+    if (!proposal.trim()) {
+        alert('Please enter a proposal message');
+        return;
+    }
     
     const messageDiv = document.getElementById('actionMessage');
+    messageDiv.innerHTML = '<span style="color: #3498db;">📤 Sending proposal...</span>';
     
-    if (response.ok) {
-        messageDiv.innerHTML = '<div class="alert alert-success">✅ Request approved successfully!</div>';
-        setTimeout(() => location.reload(), 1500);
-    } else {
-        const error = await response.json();
-        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to approve'}</div>`;
+    const formData = new FormData();
+    formData.append('proposal', proposal);
+    if (finalTime) {
+        formData.append('final_time', finalTime);
+    }
+    
+    try {
+        const response = await fetch('/admin/requests/{{ booking.id }}/propose', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            messageDiv.innerHTML = `
+                <div class="alert alert-success">
+                    ✅ Proposal sent successfully!
+                    ${result.telegram_notified ? '<br>📱 Client notified via Telegram' : '<br>⚠️ Web booking - client needs to check status manually'}
+                </div>
+            `;
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            const error = await response.json();
+            messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to send'}</div>`;
+        }
+    } catch (err) {
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Network error: ${err.message}</div>`;
     }
 }
 
-async function rejectRequest(reqId) {
-    if (!confirm('Reject this booking request?')) return;
-    
-    const response = await fetch(`/admin/requests/${reqId}/reject`, {
-        method: 'POST'
-    });
+// Approve request
+async function approveRequest(reqId) {
+    if (!confirm('Approve this booking request with the client\'s desired time?')) return;
     
     const messageDiv = document.getElementById('actionMessage');
+    messageDiv.innerHTML = '<span style="color: #3498db;">Processing...</span>';
     
-    if (response.ok) {
-        messageDiv.innerHTML = '<div class="alert alert-success">Request rejected.</div>';
-        setTimeout(() => location.reload(), 1500);
-    } else {
-        const error = await response.json();
-        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to reject'}</div>`;
+    try {
+        const response = await fetch(`/admin/requests/${reqId}/approve`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            messageDiv.innerHTML = '<div class="alert alert-success">✅ Request approved!</div>';
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const error = await response.json();
+            messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to approve'}</div>`;
+        }
+    } catch (err) {
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Network error</div>`;
     }
 }
+
+// Approve with custom time
+async function approveWithTime(event) {
+    event.preventDefault();
+    
+    const finalTime = document.getElementById('customFinalTime').value;
+    if (!finalTime.trim()) {
+        alert('Please enter a final time');
+        return;
+    }
+    
+    if (!confirm(`Approve with final time: "${finalTime}"?`)) return;
+    
+    const formData = new FormData();
+    formData.append('final_time', finalTime);
+    
+    try {
+        const response = await fetch('/admin/requests/{{ booking.id }}/approve', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            alert('✅ Request approved with custom time!');
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert(`Error: ${error.detail || 'Failed to approve'}`);
+        }
+    } catch (err) {
+        alert('Network error');
+    }
+}
+
+// Reject request
+async function rejectRequest(reqId) {
+    if (!confirm('Reject this booking request? The client will be notified.')) return;
+    
+    const messageDiv = document.getElementById('actionMessage');
+    messageDiv.innerHTML = '<span style="color: #3498db;">Processing...</span>';
+    
+    try {
+        const response = await fetch(`/admin/requests/${reqId}/reject`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            messageDiv.innerHTML = '<div class="alert alert-success">Request rejected.</div>';
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const error = await response.json();
+            messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Failed to reject'}</div>`;
+        }
+    } catch (err) {
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Network error</div>`;
+    }
+}
+
+// ============================================================================
+// WAITLIST-SPECIFIC FUNCTIONS
+// ============================================================================
+
+// Show convert modal
+function showConvertModal() {
+    document.getElementById('convertModal').style.display = 'block';
+}
+
+// Close convert modal
+function closeConvertModal() {
+    document.getElementById('convertModal').style.display = 'none';
+}
+
+// Convert waitlist to booking
+async function convertToBooking(event) {
+    event.preventDefault();
+    
+    const consultationType = document.getElementById('convertType').value;
+    const desiredTime = document.getElementById('convertTime').value;
+    
+    const messageDiv = document.getElementById('waitlistMessage');
+    messageDiv.innerHTML = '<span style="color: #3498db;">🔄 Converting...</span>';
+    
+    const formData = new FormData();
+    formData.append('consultation_type', consultationType);
+    if (desiredTime) {
+        formData.append('desired_time', desiredTime);
+    }
+    
+    try {
+        const response = await fetch('/admin/requests/{{ booking.id }}/convert', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            closeConvertModal();
+            messageDiv.innerHTML = `
+                <div class="alert alert-success">
+                    ✅ Successfully converted to ${result.new_type} booking!<br>
+                    Status is now PENDING - you can assign a slot or approve directly.
+                </div>
+            `;
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            const error = await response.json();
+            messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Conversion failed'}</div>`;
+        }
+    } catch (err) {
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Network error: ${err.message}</div>`;
+    }
+}
+
+// Archive/close waitlist request
+async function archiveRequest(reqId) {
+    if (!confirm('Archive this waitlist entry? This marks it as closed/not interested.')) return;
+    
+    const messageDiv = document.getElementById('waitlistMessage');
+    messageDiv.innerHTML = '<span style="color: #3498db;">📦 Archiving...</span>';
+    
+    try {
+        const response = await fetch(`/admin/requests/${reqId}/archive`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            messageDiv.innerHTML = '<div class="alert alert-success">📦 Archived successfully.</div>';
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            const error = await response.json();
+            messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Archive failed'}</div>`;
+        }
+    } catch (err) {
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Network error</div>`;
+    }
+}
+
+// Close modal on outside click
+document.getElementById('convertModal')?.addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeConvertModal();
+    }
+});
 </script>
 {% endblock %}

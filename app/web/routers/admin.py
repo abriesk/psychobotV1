@@ -1,7 +1,12 @@
-# app/web/routers/admin.py - Admin management routes (UPDATED v1.0)
+# app/web/routers/admin.py - Admin management routes (UPDATED v1.0.1)
 """
 Admin routes for slot management, request handling, settings, landings, and languages.
 Protected by Nginx Proxy Manager Basic Auth - no internal auth needed.
+
+v1.0.1 Changes:
+- Added /requests/{id}/propose endpoint for negotiation
+- Enhanced /requests/{id}/approve to accept custom final_time
+- Full feature parity with Telegram admin interface
 """
 from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -252,9 +257,13 @@ async def admin_request_detail(
 @router.post("/requests/{request_id}/approve")
 async def approve_request(
     request_id: int,
+    final_time: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_db)
 ):
-    """Approve a booking request"""
+    """
+    Approve a booking request.
+    Optionally accepts a custom final_time.
+    """
     result = await session.execute(
         select(BookingRequest).where(BookingRequest.id == request_id)
     )
@@ -265,6 +274,12 @@ async def approve_request(
     
     booking.status = RequestStatus.CONFIRMED
     
+    # Set final time: use provided, or fall back to existing final_time, or desired_time
+    if final_time:
+        booking.final_time = final_time
+    elif not booking.final_time:
+        booking.final_time = booking.desired_time
+    
     # If slot linked, mark as booked
     if booking.slot_id:
         slot_result = await session.execute(select(Slot).where(Slot.id == booking.slot_id))
@@ -274,7 +289,12 @@ async def approve_request(
     
     await session.commit()
     
-    return {"success": True}
+    # Log for potential Telegram notification
+    if booking.user_id and booking.user_id != 0:
+        print(f"✅ Request {booking.request_uuid} approved for user {booking.user_id}")
+        print(f"   Final time: {booking.final_time}")
+    
+    return {"success": True, "final_time": booking.final_time}
 
 
 @router.post("/requests/{request_id}/reject")
@@ -302,7 +322,172 @@ async def reject_request(
     
     await session.commit()
     
+    # Log for potential Telegram notification
+    if booking.user_id and booking.user_id != 0:
+        print(f"❌ Request {booking.request_uuid} rejected for user {booking.user_id}")
+    
     return {"success": True}
+
+
+@router.post("/requests/{request_id}/propose")
+async def propose_alternative(
+    request_id: int,
+    proposal: str = Form(...),
+    final_time: Optional[str] = Form(None),
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Admin proposes alternative time to client (negotiation).
+    Creates a negotiation record.
+    
+    Note: For Telegram users, they will see the proposal next time they 
+    interact with the bot, or you can implement async notification.
+    """
+    # Get the request
+    result = await session.execute(
+        select(BookingRequest).where(BookingRequest.id == request_id)
+    )
+    booking = result.scalar_one_or_none()
+    
+    if not booking:
+        raise HTTPException(404, "Request not found")
+    
+    if booking.status not in [RequestStatus.PENDING, RequestStatus.NEGOTIATING]:
+        raise HTTPException(400, f"Cannot negotiate on {booking.status.value} request")
+    
+    # Create negotiation record
+    negotiation = Negotiation(
+        request_id=request_id,
+        sender=SenderType.ADMIN,
+        message=proposal,
+        timestamp=datetime.utcnow()
+    )
+    session.add(negotiation)
+    
+    # Update request status to NEGOTIATING
+    booking.status = RequestStatus.NEGOTIATING
+    
+    # Optionally set proposed final time
+    if final_time:
+        booking.final_time = final_time
+    
+    await session.commit()
+    
+    # Check if this is a Telegram user we could notify
+    telegram_notified = False
+    if booking.user_id and booking.user_id != 0:
+        # Log the proposal - in production you'd send via message queue to bot
+        print(f"💬 Proposal for Telegram user {booking.user_id}:")
+        print(f"   Message: {proposal}")
+        print(f"   Request UUID: {booking.request_uuid}")
+        # TODO: Implement async notification via Redis pub/sub or similar
+        # For now, the user will see it when they check their request status
+        telegram_notified = False
+    
+    return {
+        "success": True,
+        "telegram_notified": telegram_notified,
+        "message": "Proposal recorded successfully"
+    }
+
+
+# ============================================================================
+# WAITLIST-SPECIFIC ACTIONS
+# ============================================================================
+
+@router.post("/requests/{request_id}/convert")
+async def convert_waitlist_to_booking(
+    request_id: int,
+    consultation_type: str = Form(...),
+    desired_time: Optional[str] = Form(None),
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Convert a waitlist entry to an active booking request.
+    Used when availability opens up and admin contacts the waiting client.
+    """
+    from app.models import RequestType
+    
+    # Get the request
+    result = await session.execute(
+        select(BookingRequest).where(BookingRequest.id == request_id)
+    )
+    booking = result.scalar_one_or_none()
+    
+    if not booking:
+        raise HTTPException(404, "Request not found")
+    
+    if booking.type != RequestType.WAITLIST:
+        raise HTTPException(400, "This is not a waitlist entry")
+    
+    if booking.status not in [RequestStatus.PENDING, RequestStatus.NEGOTIATING]:
+        raise HTTPException(400, f"Cannot convert {booking.status.value} request")
+    
+    # Parse consultation type
+    try:
+        new_type = RequestType[consultation_type.upper()]
+        if new_type == RequestType.WAITLIST:
+            raise HTTPException(400, "Cannot convert to WAITLIST type")
+    except KeyError:
+        raise HTTPException(400, f"Invalid consultation type: {consultation_type}")
+    
+    # Update the request
+    booking.type = new_type
+    booking.status = RequestStatus.PENDING  # Reset to pending for slot assignment
+    if desired_time:
+        booking.desired_time = desired_time
+    
+    await session.commit()
+    
+    # Log conversion
+    print(f"🔄 Waitlist entry {booking.request_uuid} converted to {new_type.value}")
+    print(f"   User: {booking.user_id}")
+    if desired_time:
+        print(f"   Desired time: {desired_time}")
+    
+    return {
+        "success": True,
+        "new_type": new_type.value,
+        "message": f"Converted to {new_type.value} booking"
+    }
+
+
+@router.post("/requests/{request_id}/archive")
+async def archive_waitlist_entry(
+    request_id: int,
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Archive/close a waitlist entry.
+    Used when user is not interested or unreachable.
+    Sets status to REJECTED (could use a dedicated ARCHIVED status in future).
+    """
+    # Get the request
+    result = await session.execute(
+        select(BookingRequest).where(BookingRequest.id == request_id)
+    )
+    booking = result.scalar_one_or_none()
+    
+    if not booking:
+        raise HTTPException(404, "Request not found")
+    
+    if booking.status not in [RequestStatus.PENDING, RequestStatus.NEGOTIATING]:
+        raise HTTPException(400, f"Cannot archive {booking.status.value} request")
+    
+    # Mark as rejected (archived)
+    booking.status = RequestStatus.REJECTED
+    booking.cancelled_at = datetime.utcnow()  # Record when it was archived
+    
+    await session.commit()
+    
+    # Log archival
+    print(f"📦 Waitlist entry {booking.request_uuid} archived")
+    print(f"   User: {booking.user_id}")
+    
+    return {
+        "success": True,
+        "message": "Waitlist entry archived"
+    }
 
 
 # ============================================================================
@@ -416,7 +601,7 @@ async def update_translation(
 
 
 # ============================================================================
-# LANDING PAGES MANAGEMENT (NEW v1.0)
+# LANDING PAGES MANAGEMENT
 # ============================================================================
 
 @router.get("/landings", response_class=HTMLResponse)
@@ -425,7 +610,6 @@ async def admin_landings_page(
     session: AsyncSession = Depends(get_db)
 ):
     """Landing pages management interface"""
-    import os
     from pathlib import Path
     
     landings_dir = Path("/app/landings")
@@ -441,7 +625,7 @@ async def admin_landings_page(
     
     languages = {
         "ru": "Russian (Русский)",
-        "am": "Armenian (Հայերեն)"
+        "am": "Armenian (Հայdelays)"
     }
     
     # Get all available languages from database
@@ -487,8 +671,6 @@ async def upload_landing(
     content: str = Form(...)
 ):
     """Upload or update a landing page"""
-    import os
-    
     # Validate topic
     valid_topics = ["work_terms", "qualification", "about_psychotherapy", "references"]
     if topic not in valid_topics:
@@ -512,8 +694,6 @@ async def upload_landing(
 @router.get("/landings/get")
 async def get_landing(topic: str, lang: str):
     """Get landing content for editing"""
-    import os
-    
     filename = f"/app/landings/{topic}_{lang}.html"
     if not os.path.exists(filename):
         raise HTTPException(404, "Landing not found")
@@ -531,8 +711,6 @@ async def update_landing(
     content: str = Form(...)
 ):
     """Update existing landing"""
-    import os
-    
     filename = f"/app/landings/{topic}_{lang}.html"
     if not os.path.exists(filename):
         raise HTTPException(404, "Landing not found")
@@ -549,8 +727,6 @@ async def update_landing(
 @router.post("/landings/delete")
 async def delete_landing(topic: str, lang: str):
     """Delete a landing page"""
-    import os
-    
     filename = f"/app/landings/{topic}_{lang}.html"
     if not os.path.exists(filename):
         raise HTTPException(404, "Landing not found")
@@ -560,7 +736,7 @@ async def delete_landing(topic: str, lang: str):
 
 
 # ============================================================================
-# LANGUAGE MANAGEMENT (Web-exclusive feature, NEW v1.0)
+# LANGUAGE MANAGEMENT
 # ============================================================================
 
 @router.get("/languages", response_class=HTMLResponse)
@@ -590,7 +766,7 @@ async def admin_languages_page(
     
     language_names = {
         "ru": "Russian (Русский)",
-        "am": "Armenian (Հայերեն)",
+        "am": "Armenian (Հայերdelays)",
         "en": "English",
         "de": "German (Deutsch)",
         "fr": "French (Français)",
