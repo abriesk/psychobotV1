@@ -26,13 +26,11 @@
         <div class="form-group">
             <label>Your Timezone:</label>
             <select name="timezone" id="timezone" required>
-                <option value="UTC+4">UTC+4 (Yerevan)</option>
-                <option value="UTC+3">UTC+3 (Moscow)</option>
-                <option value="UTC+2">UTC+2 (Kiev)</option>
-                <option value="UTC+1">UTC+1 (Berlin)</option>
-                <option value="UTC+0">UTC+0 (London)</option>
-                <option value="UTC-5">UTC-5 (New York)</option>
+                <option value="">Loading timezones...</option>
             </select>
+            <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                Select the timezone where you are located
+            </small>
         </div>
         
         <div class="form-group">
@@ -62,19 +60,78 @@
 
 {% block extra_js %}
 <script>
+// Load timezones on page load
+document.addEventListener('DOMContentLoaded', loadTimezones);
+
+async function loadTimezones() {
+    try {
+        const response = await fetch('/admin/api/timezones/active');
+        const data = await response.json();
+        
+        const select = document.getElementById('timezone');
+        select.innerHTML = '';
+        
+        if (data.timezones && data.timezones.length > 0) {
+            data.timezones.forEach(tz => {
+                const option = document.createElement('option');
+                option.value = tz.offset_str;
+                option.textContent = `${tz.offset_str} — ${tz.display_name}`;
+                select.appendChild(option);
+            });
+            
+            // Try to detect user's timezone and select it
+            tryAutoSelectTimezone(data.timezones);
+        } else {
+            // Fallback options
+            select.innerHTML = `
+                <option value="UTC+4">UTC+4 (Yerevan)</option>
+                <option value="UTC+3">UTC+3 (Moscow)</option>
+                <option value="UTC+0">UTC+0 (London)</option>
+            `;
+        }
+    } catch (err) {
+        console.error('Failed to load timezones:', err);
+        // Fallback
+        document.getElementById('timezone').innerHTML = `
+            <option value="UTC+4">UTC+4 (Yerevan)</option>
+            <option value="UTC+3">UTC+3 (Moscow)</option>
+            <option value="UTC+0">UTC+0 (London)</option>
+        `;
+    }
+}
+
+function tryAutoSelectTimezone(timezones) {
+    // Get browser's timezone offset in minutes
+    const offsetMinutes = -new Date().getTimezoneOffset();
+    
+    // Find matching timezone
+    for (const tz of timezones) {
+        if (tz.offset_minutes === offsetMinutes) {
+            document.getElementById('timezone').value = tz.offset_str;
+            console.log(`Auto-selected timezone: ${tz.offset_str}`);
+            return;
+        }
+    }
+}
+
 document.getElementById('loadSlots').addEventListener('click', async () => {
     const format = document.getElementById('format').value;
     const timezone = document.getElementById('timezone').value;
     const isOnline = format === 'online';
     
-    const response = await fetch(`/api/slots/available?is_online=${isOnline}&timezone_offset=${timezone}&limit=10`);
+    if (!timezone) {
+        alert('Please select your timezone first');
+        return;
+    }
+    
+    const response = await fetch(`/api/slots/available?is_online=${isOnline}&timezone_offset=${encodeURIComponent(timezone)}&limit=10`);
     const data = await response.json();
     
     const container = document.getElementById('slotsContainer');
     container.innerHTML = '';
     
     if (data.slots.length === 0) {
-        container.innerHTML = '<p style="color: #e74c3c;">No available slots at this time.</p>';
+        container.innerHTML = '<p style="color: #e74c3c;">No available slots at this time. Please check back later or contact us directly.</p>';
         return;
     }
     
@@ -97,6 +154,12 @@ document.getElementById('loadSlots').addEventListener('click', async () => {
 document.getElementById('bookingForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     
+    const slotId = document.getElementById('selectedSlotId').value;
+    if (!slotId) {
+        alert('Please select a time slot');
+        return;
+    }
+    
     const formData = new FormData(e.target);
     const response = await fetch('/api/booking/submit', {
         method: 'POST',
@@ -117,6 +180,7 @@ document.getElementById('bookingForm').addEventListener('submit', async (e) => {
         `;
         e.target.reset();
         document.getElementById('slotsContainer').innerHTML = '';
+        loadTimezones(); // Reload timezones for fresh state
     } else {
         messageDiv.innerHTML = `<div class="alert alert-error">Error: ${result.message || 'Please try again'}</div>`;
     }

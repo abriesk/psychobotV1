@@ -1,4 +1,4 @@
-# app/web/routers/client.py - UPDATED with landing content
+# app/web/routers/client.py - Public client routes (v1.1 with dynamic timezones)
 """
 Public routes for client booking interface.
 No authentication required.
@@ -10,9 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
 from typing import Optional
-from pathlib import Path
 
-from app.models import Slot, SlotStatus, Request as BookingRequest, RequestType, RequestStatus, User
+from app.models import Slot, SlotStatus, Request as BookingRequest, RequestType, RequestStatus, User, Timezone
 from app.utils_slots import (
     parse_utc_offset, get_available_slots, format_slot_time,
     hold_slot, confirm_slot_booking
@@ -29,67 +28,6 @@ templates = Jinja2Templates(directory="app/web/templates")
 # PAGE ROUTES
 # ============================================================================
 
-@router.get("/", response_class=HTMLResponse)
-async def client_index(request: Request, lang: str = "ru"):
-    """
-    Client landing page with content from uploaded landings.
-    Displays work terms, qualification, about psychotherapy, and references.
-    """
-    landings_dir = Path("/app/landings")
-    landing_content = {}
-    
-    # Define topics to display
-    topics = {
-        "work_terms": {
-            "ru": "Условия работы",
-            "am": "Աշխատանքի պայմաններ",
-            "en": "Work Terms"
-        },
-        "qualification": {
-            "ru": "Квалификация",
-            "am": "Որակավորում",
-            "en": "Qualification"
-        },
-        "about_psychotherapy": {
-            "ru": "О психотерапии",
-            "am": "Հոգեթերապիայի մասին",
-            "en": "About Psychotherapy"
-        },
-        "references": {
-            "ru": "Рекомендации",
-            "am": "Հղումներ",
-            "en": "References"
-        }
-    }
-    
-    # Load landing content for selected language
-    for topic_key in topics.keys():
-        file_path = landings_dir / f"{topic_key}_{lang}.html"
-        if file_path.exists():
-            try:
-                content = file_path.read_text(encoding='utf-8')
-                landing_content[topic_key] = {
-                    "title": topics[topic_key].get(lang, topic_key),
-                    "content": content
-                }
-            except Exception as e:
-                print(f"Error reading landing {topic_key}_{lang}: {e}")
-    
-    return templates.TemplateResponse(
-        "client/index.html",
-        {
-            "request": request,
-            "lang": lang,
-            "landings": landing_content,
-            "languages": {
-                "ru": "Русский",
-                "am": "Հայերեն"
-            },
-            "has_content": len(landing_content) > 0
-        }
-    )
-
-
 @router.get("/book", response_class=HTMLResponse)
 async def booking_page(request: Request, lang: str = "ru"):
     """Client booking page"""
@@ -98,7 +36,7 @@ async def booking_page(request: Request, lang: str = "ru"):
         {
             "request": request,
             "lang": lang,
-            "languages": {"ru": "Русский", "am": "Հայերեն"}
+            "languages": {"ru": "Русский", "am": "Հայdelays"}
         }
     )
 
@@ -120,6 +58,34 @@ async def booking_success(request: Request, uuid: str, lang: str = "ru"):
 # API ENDPOINTS
 # ============================================================================
 
+@router.get("/api/timezones")
+async def get_timezones_api(
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Get all active timezones for client booking.
+    v1.1: Dynamic from database.
+    """
+    result = await session.execute(
+        select(Timezone)
+        .where(Timezone.is_active == True)
+        .order_by(Timezone.sort_order, Timezone.offset_minutes)
+    )
+    timezones = result.scalars().all()
+    
+    return {
+        "timezones": [
+            {
+                "id": tz.id,
+                "offset_str": tz.offset_str,
+                "offset_minutes": tz.offset_minutes,
+                "display_name": tz.display_name
+            }
+            for tz in timezones
+        ]
+    }
+
+
 @router.get("/api/slots/available")
 async def get_available_slots_api(
     is_online: bool = True,
@@ -135,10 +101,19 @@ async def get_available_slots_api(
     - timezone_offset: User's timezone (e.g., UTC+4)
     - limit: Max number of slots to return
     """
-    # Parse timezone offset
-    offset_minutes = parse_utc_offset(timezone_offset)
-    if offset_minutes is None:
-        raise HTTPException(400, "Invalid timezone offset format")
+    # First try to find timezone in database
+    tz_result = await session.execute(
+        select(Timezone).where(Timezone.offset_str == timezone_offset)
+    )
+    timezone = tz_result.scalar_one_or_none()
+    
+    if timezone:
+        offset_minutes = timezone.offset_minutes
+    else:
+        # Fallback to parsing the string
+        offset_minutes = parse_utc_offset(timezone_offset)
+        if offset_minutes is None:
+            raise HTTPException(400, "Invalid timezone offset format")
     
     # Get available slots
     slots = await get_available_slots(
@@ -212,8 +187,14 @@ async def submit_booking(
     slot_result = await session.execute(select(Slot).where(Slot.id == slot_id))
     slot = slot_result.scalar_one()
     
-    offset_minutes = parse_utc_offset(timezone)
-    slot_time = format_slot_time(slot, offset_minutes if offset_minutes else 0)
+    # Get offset from timezone
+    tz_result = await session.execute(
+        select(Timezone).where(Timezone.offset_str == timezone)
+    )
+    tz = tz_result.scalar_one_or_none()
+    offset_minutes = tz.offset_minutes if tz else parse_utc_offset(timezone) or 0
+    
+    slot_time = format_slot_time(slot, offset_minutes)
     
     return {
         "success": True,

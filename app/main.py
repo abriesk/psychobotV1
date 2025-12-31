@@ -5,7 +5,7 @@ from telegram.ext import filters as tg_filters
 from app.db import init_db
 from app.handlers import common, consultation, admin, user_negotiation
 from app.translations import load_translations_cache
-from app.scheduler import start_scheduler, stop_scheduler, set_bot_instance  # Added set_bot_instance
+from app.scheduler import start_scheduler, stop_scheduler
 
 # Import dynamic custom filters
 import app.filters as custom_filters
@@ -23,10 +23,6 @@ async def post_init(application):
     # Load translations from DB into memory cache
     await load_translations_cache()
     print("✅ Translation cache loaded - filters are now language-agnostic!")
-    
-    # Register bot instance for scheduler notifications (Web → Telegram bridge)
-    set_bot_instance(application.bot)
-    print("✅ Bot instance registered with scheduler for web notifications.")
     
     # Start scheduler for background jobs
     start_scheduler()
@@ -71,7 +67,7 @@ def main():
     )
     
     # --- Conversation: Consultation Booking ---
-    # Uses custom_filters.booking_button (language-agnostic!)
+    # v1.1: Now includes TIMEZONE_SELECT state for button-based timezone selection
     consult_conv = ConversationHandler(
         entry_points=[MessageHandler(custom_filters.booking_button, consultation.start_consultation)],
         states={
@@ -86,6 +82,10 @@ def main():
                     tg_filters.TEXT & ~tg_filters.COMMAND & ~custom_filters.home_button & ~custom_filters.admin_button_hardcoded, 
                     consultation.timezone_step
                 )
+            ],
+            # v1.1 NEW: Timezone button selection state
+            consultation.TIMEZONE_SELECT: [
+                CallbackQueryHandler(consultation.timezone_button_selected, pattern="^tz_")
             ],
             consultation.SLOT_SELECT: [
                 MessageHandler(
@@ -103,7 +103,9 @@ def main():
                 MessageHandler(
                     tg_filters.TEXT & ~tg_filters.COMMAND & ~custom_filters.home_button & ~custom_filters.admin_button_hardcoded, 
                     consultation.problem_step
-                )
+                ),
+                # Slot selection can happen during PROBLEM state
+                CallbackQueryHandler(consultation.slot_selected_callback, pattern="^slot_")
             ],
             consultation.CONTACTS: [
                 MessageHandler(
@@ -122,7 +124,8 @@ def main():
             MessageHandler(custom_filters.home_button, common.back_to_home),
             MessageHandler(custom_filters.admin_button_hardcoded, cancel_any_conversation),
             CommandHandler("cancel", common.back_to_home),
-            CallbackQueryHandler(consultation.slot_selected_callback, pattern="^slot_")
+            CallbackQueryHandler(consultation.slot_selected_callback, pattern="^slot_"),
+            CallbackQueryHandler(consultation.timezone_button_selected, pattern="^tz_")
         ],
         per_user=True,
         per_chat=True,
@@ -300,6 +303,7 @@ def main():
     app.add_handler(MessageHandler(custom_filters.home_button, common.back_to_home))
 
     print("✅ All handlers registered with language-agnostic filters")
+    print("✅ v1.1: Timezone button selection enabled")
     app.run_polling()
 
 if __name__ == '__main__':

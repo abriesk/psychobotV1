@@ -1,12 +1,7 @@
-# app/web/routers/admin.py - Admin management routes (UPDATED v1.0.1)
+# app/web/routers/admin.py - Admin management routes (v1.1 with Timezones)
 """
-Admin routes for slot management, request handling, settings, landings, and languages.
+Admin routes for slot management, request handling, settings, landings, languages, and timezones.
 Protected by Nginx Proxy Manager Basic Auth - no internal auth needed.
-
-v1.0.1 Changes:
-- Added /requests/{id}/propose endpoint for negotiation
-- Enhanced /requests/{id}/approve to accept custom final_time
-- Full feature parity with Telegram admin interface
 """
 from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,8 +13,7 @@ from typing import Optional
 
 from app.models import (
     Slot, SlotStatus, Request as BookingRequest, RequestStatus,
-    Settings, Translation, Negotiation, SenderType,
-    PendingNotification, NotificationType  # NEW: For web→bot notifications
+    Settings, Translation, Negotiation, SenderType, Timezone
 )
 from app.utils_slots import (
     parse_utc_offset, user_tz_to_utc, validate_slot_time,
@@ -79,6 +73,166 @@ async def admin_dashboard(
 
 
 # ============================================================================
+# TIMEZONE MANAGEMENT (NEW v1.1)
+# ============================================================================
+
+@router.get("/timezones", response_class=HTMLResponse)
+async def admin_timezones_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db)
+):
+    """Timezone management page"""
+    result = await session.execute(
+        select(Timezone).order_by(Timezone.sort_order, Timezone.offset_minutes)
+    )
+    timezones = result.scalars().all()
+    
+    return templates.TemplateResponse(
+        "admin/timezones.html",
+        {
+            "request": request,
+            "timezones": timezones
+        }
+    )
+
+
+@router.post("/timezones/add")
+async def add_timezone(
+    offset_str: str = Form(...),
+    offset_minutes: int = Form(...),
+    display_name: str = Form(...),
+    sort_order: int = Form(10),
+    session: AsyncSession = Depends(get_db)
+):
+    """Add a new timezone"""
+    # Check if offset_str already exists
+    result = await session.execute(
+        select(Timezone).where(Timezone.offset_str == offset_str)
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(400, f"Timezone {offset_str} already exists")
+    
+    # Validate offset format
+    if not offset_str.startswith('UTC'):
+        raise HTTPException(400, "Offset must start with 'UTC'")
+    
+    # Create timezone
+    timezone = Timezone(
+        offset_str=offset_str,
+        offset_minutes=offset_minutes,
+        display_name=display_name,
+        is_active=True,
+        sort_order=sort_order
+    )
+    session.add(timezone)
+    await session.commit()
+    
+    return {"success": True, "id": timezone.id}
+
+
+@router.post("/timezones/{tz_id}/update")
+async def update_timezone(
+    tz_id: int,
+    display_name: Optional[str] = Form(None),
+    sort_order: Optional[int] = Form(None),
+    session: AsyncSession = Depends(get_db)
+):
+    """Update timezone display name or sort order"""
+    result = await session.execute(select(Timezone).where(Timezone.id == tz_id))
+    timezone = result.scalar_one_or_none()
+    
+    if not timezone:
+        raise HTTPException(404, "Timezone not found")
+    
+    if display_name is not None:
+        timezone.display_name = display_name
+    if sort_order is not None:
+        timezone.sort_order = sort_order
+    
+    await session.commit()
+    return {"success": True}
+
+
+@router.post("/timezones/{tz_id}/enable")
+async def enable_timezone(
+    tz_id: int,
+    session: AsyncSession = Depends(get_db)
+):
+    """Enable a timezone"""
+    result = await session.execute(select(Timezone).where(Timezone.id == tz_id))
+    timezone = result.scalar_one_or_none()
+    
+    if not timezone:
+        raise HTTPException(404, "Timezone not found")
+    
+    timezone.is_active = True
+    await session.commit()
+    return {"success": True}
+
+
+@router.post("/timezones/{tz_id}/disable")
+async def disable_timezone(
+    tz_id: int,
+    session: AsyncSession = Depends(get_db)
+):
+    """Disable a timezone"""
+    result = await session.execute(select(Timezone).where(Timezone.id == tz_id))
+    timezone = result.scalar_one_or_none()
+    
+    if not timezone:
+        raise HTTPException(404, "Timezone not found")
+    
+    timezone.is_active = False
+    await session.commit()
+    return {"success": True}
+
+
+@router.post("/timezones/{tz_id}/delete")
+async def delete_timezone(
+    tz_id: int,
+    session: AsyncSession = Depends(get_db)
+):
+    """Delete a timezone"""
+    result = await session.execute(select(Timezone).where(Timezone.id == tz_id))
+    timezone = result.scalar_one_or_none()
+    
+    if not timezone:
+        raise HTTPException(404, "Timezone not found")
+    
+    await session.delete(timezone)
+    await session.commit()
+    return {"success": True}
+
+
+@router.get("/api/timezones/active")
+async def get_active_timezones_api(
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    API endpoint to get active timezones.
+    Used by web booking interface.
+    """
+    result = await session.execute(
+        select(Timezone)
+        .where(Timezone.is_active == True)
+        .order_by(Timezone.sort_order, Timezone.offset_minutes)
+    )
+    timezones = result.scalars().all()
+    
+    return {
+        "timezones": [
+            {
+                "id": tz.id,
+                "offset_str": tz.offset_str,
+                "offset_minutes": tz.offset_minutes,
+                "display_name": tz.display_name
+            }
+            for tz in timezones
+        ]
+    }
+
+
+# ============================================================================
 # SLOT MANAGEMENT
 # ============================================================================
 
@@ -97,11 +251,20 @@ async def admin_slots_page(
     )
     slots = result.scalars().all()
     
+    # Get active timezones for slot creation form
+    tz_result = await session.execute(
+        select(Timezone)
+        .where(Timezone.is_active == True)
+        .order_by(Timezone.sort_order)
+    )
+    timezones = tz_result.scalars().all()
+    
     return templates.TemplateResponse(
         "admin/slots.html",
         {
             "request": request,
-            "slots": slots
+            "slots": slots,
+            "timezones": timezones
         }
     )
 
@@ -258,13 +421,9 @@ async def admin_request_detail(
 @router.post("/requests/{request_id}/approve")
 async def approve_request(
     request_id: int,
-    final_time: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_db)
 ):
-    """
-    Approve a booking request.
-    Optionally accepts a custom final_time.
-    """
+    """Approve a booking request"""
     result = await session.execute(
         select(BookingRequest).where(BookingRequest.id == request_id)
     )
@@ -275,12 +434,6 @@ async def approve_request(
     
     booking.status = RequestStatus.CONFIRMED
     
-    # Set final time: use provided, or fall back to existing final_time, or desired_time
-    if final_time:
-        booking.final_time = final_time
-    elif not booking.final_time:
-        booking.final_time = booking.desired_time
-    
     # If slot linked, mark as booked
     if booking.slot_id:
         slot_result = await session.execute(select(Slot).where(Slot.id == booking.slot_id))
@@ -290,12 +443,7 @@ async def approve_request(
     
     await session.commit()
     
-    # Log for potential Telegram notification
-    if booking.user_id and booking.user_id != 0:
-        print(f"✅ Request {booking.request_uuid} approved for user {booking.user_id}")
-        print(f"   Final time: {booking.final_time}")
-    
-    return {"success": True, "final_time": booking.final_time}
+    return {"success": True}
 
 
 @router.post("/requests/{request_id}/reject")
@@ -323,253 +471,7 @@ async def reject_request(
     
     await session.commit()
     
-    # Log for potential Telegram notification
-    if booking.user_id and booking.user_id != 0:
-        print(f"❌ Request {booking.request_uuid} rejected for user {booking.user_id}")
-    
     return {"success": True}
-
-
-@router.post("/requests/{request_id}/propose")
-async def propose_alternative(
-    request_id: int,
-    proposal: str = Form(...),
-    final_time: Optional[str] = Form(None),
-    session: AsyncSession = Depends(get_db)
-):
-    """
-    Admin proposes alternative time to client (negotiation).
-    Creates a negotiation record and queues Telegram notification.
-    """
-    # Get the request
-    result = await session.execute(
-        select(BookingRequest).where(BookingRequest.id == request_id)
-    )
-    booking = result.scalar_one_or_none()
-    
-    if not booking:
-        raise HTTPException(404, "Request not found")
-    
-    if booking.status not in [RequestStatus.PENDING, RequestStatus.NEGOTIATING]:
-        raise HTTPException(400, f"Cannot negotiate on {booking.status.value} request")
-    
-    # Create negotiation record
-    negotiation = Negotiation(
-        request_id=request_id,
-        sender=SenderType.ADMIN,
-        message=proposal,
-        timestamp=datetime.utcnow()
-    )
-    session.add(negotiation)
-    
-    # Update request status to NEGOTIATING
-    booking.status = RequestStatus.NEGOTIATING
-    
-    # Optionally set proposed final time
-    if final_time:
-        booking.final_time = final_time
-    
-    # Queue Telegram notification for bot to send
-    telegram_notified = False
-    if booking.user_id and booking.user_id != 0:
-        notification = PendingNotification(
-            user_id=booking.user_id,
-            request_id=request_id,
-            notification_type=NotificationType.PROPOSAL,
-            message=proposal,
-            proposed_time=final_time,
-            created_at=datetime.utcnow()
-        )
-        session.add(notification)
-        telegram_notified = True  # Queued for delivery
-        print(f"📬 Queued proposal notification for user {booking.user_id}")
-    
-    await session.commit()
-    
-    return {
-        "success": True,
-        "telegram_notified": telegram_notified,
-        "message": "Proposal sent!" if telegram_notified else "Proposal recorded (web booking - no Telegram notification)"
-    }
-
-
-# ============================================================================
-# WAITLIST-SPECIFIC ACTIONS
-# ============================================================================
-
-@router.post("/requests/{request_id}/convert")
-async def convert_waitlist_to_booking(
-    request_id: int,
-    consultation_type: str = Form(...),
-    slot_id: Optional[int] = Form(None),
-    proposal_message: Optional[str] = Form(None),
-    session: AsyncSession = Depends(get_db)
-):
-    """
-    Convert a waitlist entry to an active booking request.
-    Optionally assign a slot and send Telegram notification.
-    """
-    from app.models import RequestType
-    import httpx
-    
-    # Get the request
-    result = await session.execute(
-        select(BookingRequest).where(BookingRequest.id == request_id)
-    )
-    booking = result.scalar_one_or_none()
-    
-    if not booking:
-        raise HTTPException(404, "Request not found")
-    
-    if booking.type != RequestType.WAITLIST:
-        raise HTTPException(400, "This is not a waitlist entry")
-    
-    if booking.status not in [RequestStatus.PENDING, RequestStatus.NEGOTIATING]:
-        raise HTTPException(400, f"Cannot convert {booking.status.value} request")
-    
-    # Parse consultation type
-    try:
-        new_type = RequestType[consultation_type.upper()]
-        if new_type == RequestType.WAITLIST:
-            raise HTTPException(400, "Cannot convert to WAITLIST type")
-    except KeyError:
-        raise HTTPException(400, f"Invalid consultation type: {consultation_type}")
-    
-    # Update the request type
-    booking.type = new_type
-    
-    # Handle slot assignment
-    slot_time_display = None
-    if slot_id:
-        slot_result = await session.execute(
-            select(Slot).where(Slot.id == slot_id).with_for_update()
-        )
-        slot = slot_result.scalar_one_or_none()
-        
-        if not slot:
-            raise HTTPException(400, f"Slot {slot_id} not found")
-        
-        if slot.status != SlotStatus.AVAILABLE:
-            raise HTTPException(400, f"Slot {slot_id} is not available")
-        
-        # Assign slot
-        booking.slot_id = slot_id
-        booking.scheduled_datetime = slot.start_time
-        slot.status = SlotStatus.HELD  # Hold until user confirms
-        
-        # Format slot time for display
-        slot_time_display = f"{slot.start_time.strftime('%Y-%m-%d %H:%M')} UTC"
-        
-        # Set status to NEGOTIATING since we're proposing a time
-        booking.status = RequestStatus.NEGOTIATING
-    else:
-        # No slot - just convert to PENDING
-        booking.status = RequestStatus.PENDING
-    
-    # Create negotiation entry if message provided
-    if proposal_message:
-        negotiation = Negotiation(
-            request_id=request_id,
-            sender=SenderType.ADMIN,
-            message=proposal_message,
-            timestamp=datetime.utcnow()
-        )
-        session.add(negotiation)
-    
-    await session.commit()
-    
-    # Try to send Telegram notification
-    telegram_notified = False
-    if booking.user_id and booking.user_id != 0 and proposal_message:
-        bot_token = os.getenv("BOT_TOKEN")
-        if bot_token:
-            try:
-                # Build inline keyboard for accept/counter
-                keyboard = {
-                    "inline_keyboard": [
-                        [{"text": "✅ Accept", "callback_data": f"usr_yes_{request_id}"}],
-                        [{"text": "💬 Propose Different Time", "callback_data": f"usr_counter_{request_id}"}]
-                    ]
-                }
-                
-                message_text = f"📋 <b>Update on your consultation request</b>\n\n{proposal_message}"
-                if slot_time_display:
-                    message_text += f"\n\n📅 Proposed time: {slot_time_display}"
-                
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={
-                            "chat_id": booking.user_id,
-                            "text": message_text,
-                            "parse_mode": "HTML",
-                            "reply_markup": keyboard
-                        },
-                        timeout=10.0
-                    )
-                    
-                    if response.status_code == 200:
-                        telegram_notified = True
-                        print(f"📱 Telegram notification sent to user {booking.user_id}")
-                    else:
-                        print(f"⚠️ Telegram API error: {response.text}")
-                        
-            except Exception as e:
-                print(f"⚠️ Failed to send Telegram notification: {e}")
-    
-    # Log conversion
-    print(f"🔄 Waitlist entry {booking.request_uuid} converted to {new_type.value}")
-    print(f"   User: {booking.user_id}")
-    if slot_time_display:
-        print(f"   Slot assigned: {slot_time_display}")
-    
-    return {
-        "success": True,
-        "new_type": new_type.value,
-        "slot_assigned": slot_id is not None,
-        "slot_time": slot_time_display,
-        "telegram_notified": telegram_notified,
-        "user_id": booking.user_id,
-        "message": f"Converted to {new_type.value} booking"
-    }
-
-
-@router.post("/requests/{request_id}/archive")
-async def archive_waitlist_entry(
-    request_id: int,
-    session: AsyncSession = Depends(get_db)
-):
-    """
-    Archive/close a waitlist entry.
-    Used when user is not interested or unreachable.
-    Sets status to REJECTED (could use a dedicated ARCHIVED status in future).
-    """
-    # Get the request
-    result = await session.execute(
-        select(BookingRequest).where(BookingRequest.id == request_id)
-    )
-    booking = result.scalar_one_or_none()
-    
-    if not booking:
-        raise HTTPException(404, "Request not found")
-    
-    if booking.status not in [RequestStatus.PENDING, RequestStatus.NEGOTIATING]:
-        raise HTTPException(400, f"Cannot archive {booking.status.value} request")
-    
-    # Mark as rejected (archived)
-    booking.status = RequestStatus.REJECTED
-    booking.cancelled_at = datetime.utcnow()  # Record when it was archived
-    
-    await session.commit()
-    
-    # Log archival
-    print(f"📦 Waitlist entry {booking.request_uuid} archived")
-    print(f"   User: {booking.user_id}")
-    
-    return {
-        "success": True,
-        "message": "Waitlist entry archived"
-    }
 
 
 # ============================================================================
@@ -643,13 +545,17 @@ async def admin_translations_page(
     )
     translations = result.scalars().all()
     
+    # Get all available languages
+    lang_result = await session.execute(select(Translation.lang).distinct())
+    languages = [row[0] for row in lang_result.all()]
+    
     return templates.TemplateResponse(
         "admin/translations.html",
         {
             "request": request,
             "translations": translations,
             "current_lang": lang,
-            "languages": ["ru", "am"]
+            "languages": languages
         }
     )
 
@@ -692,6 +598,7 @@ async def admin_landings_page(
     session: AsyncSession = Depends(get_db)
 ):
     """Landing pages management interface"""
+    import os
     from pathlib import Path
     
     landings_dir = Path("/app/landings")
@@ -753,6 +660,8 @@ async def upload_landing(
     content: str = Form(...)
 ):
     """Upload or update a landing page"""
+    import os
+    
     # Validate topic
     valid_topics = ["work_terms", "qualification", "about_psychotherapy", "references"]
     if topic not in valid_topics:
@@ -776,6 +685,8 @@ async def upload_landing(
 @router.get("/landings/get")
 async def get_landing(topic: str, lang: str):
     """Get landing content for editing"""
+    import os
+    
     filename = f"/app/landings/{topic}_{lang}.html"
     if not os.path.exists(filename):
         raise HTTPException(404, "Landing not found")
@@ -793,6 +704,8 @@ async def update_landing(
     content: str = Form(...)
 ):
     """Update existing landing"""
+    import os
+    
     filename = f"/app/landings/{topic}_{lang}.html"
     if not os.path.exists(filename):
         raise HTTPException(404, "Landing not found")
@@ -809,6 +722,8 @@ async def update_landing(
 @router.post("/landings/delete")
 async def delete_landing(topic: str, lang: str):
     """Delete a landing page"""
+    import os
+    
     filename = f"/app/landings/{topic}_{lang}.html"
     if not os.path.exists(filename):
         raise HTTPException(404, "Landing not found")
@@ -848,7 +763,7 @@ async def admin_languages_page(
     
     language_names = {
         "ru": "Russian (Русский)",
-        "am": "Armenian (Հայերdelays)",
+        "am": "Armenian (Հdelays)",
         "en": "English",
         "de": "German (Deutsch)",
         "fr": "French (Français)",

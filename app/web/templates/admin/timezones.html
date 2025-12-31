@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block header_title %}Timezone Management{% endblock %}
+{% block title %}Manage Timezones{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>🌍 Timezone Management</h2>
+    <p>Configure which timezones are available for clients to select when booking consultations.</p>
+    
+    <div style="margin: 1.5rem 0;">
+        <button onclick="showAddForm()" class="btn btn-success">➕ Add Timezone</button>
+    </div>
+    
+    <!-- Add Timezone Form (hidden by default) -->
+    <div id="addForm" style="display: none; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
+        <h3 style="margin-top: 0;">Add New Timezone</h3>
+        <form id="addTimezoneForm">
+            <div class="form-group">
+                <label>UTC Offset:</label>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <span>UTC</span>
+                    <select name="offset_sign" style="width: auto;">
+                        <option value="+">+</option>
+                        <option value="-">−</option>
+                    </select>
+                    <input type="number" name="offset_hours" min="0" max="14" value="0" 
+                           style="width: 80px;" required>
+                    <span>:</span>
+                    <select name="offset_minutes" style="width: auto;">
+                        <option value="0">00</option>
+                        <option value="30">30</option>
+                        <option value="45">45</option>
+                    </select>
+                </div>
+                <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                    Examples: UTC+4, UTC-5, UTC+5:30
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <label>Display Name:</label>
+                <input type="text" name="display_name" 
+                       placeholder="e.g., Yerevan, Dubai, Baku" required>
+                <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                    Cities or regions shown to users (helps them identify their timezone)
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <label>Sort Order:</label>
+                <input type="number" name="sort_order" value="10" min="0" max="100">
+                <small style="color: #7f8c8d; display: block; margin-top: 0.25rem;">
+                    Lower numbers appear first in the list
+                </small>
+            </div>
+            
+            <button type="submit" class="btn btn-success">💾 Add Timezone</button>
+            <button type="button" onclick="hideAddForm()" class="btn">Cancel</button>
+        </form>
+        <div id="addMessage" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Current Timezones</h3>
+    <p style="color: #7f8c8d; margin-bottom: 1rem;">
+        {{ timezones|length }} timezone(s) configured. 
+        Active timezones are shown to clients in Telegram and web booking.
+    </p>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Offset</th>
+                <th>Display Name</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tz in timezones %}
+            <tr id="tz-row-{{ tz.id }}" style="{% if not tz.is_active %}opacity: 0.5;{% endif %}">
+                <td>
+                    <input type="number" value="{{ tz.sort_order }}" 
+                           style="width: 60px;" 
+                           onchange="updateSortOrder({{ tz.id }}, this.value)">
+                </td>
+                <td>
+                    <strong style="font-family: monospace; font-size: 1.1rem;">
+                        {{ tz.offset_str }}
+                    </strong>
+                    <br>
+                    <small style="color: #7f8c8d;">({{ tz.offset_minutes }} min)</small>
+                </td>
+                <td>
+                    <input type="text" value="{{ tz.display_name }}" 
+                           id="display-{{ tz.id }}"
+                           style="width: 100%; border: 1px solid #ddd; padding: 0.5rem;">
+                    <button class="btn" style="padding: 0.25rem 0.5rem; margin-top: 0.25rem; font-size: 0.8rem;"
+                            onclick="updateDisplayName({{ tz.id }})">
+                        💾 Save
+                    </button>
+                </td>
+                <td>
+                    {% if tz.is_active %}
+                        <span style="color: #27ae60; font-weight: bold;">✅ Active</span>
+                    {% else %}
+                        <span style="color: #95a5a6;">⏸️ Disabled</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if tz.is_active %}
+                        <button class="btn" onclick="toggleTimezone({{ tz.id }}, false)">
+                            ⏸️ Disable
+                        </button>
+                    {% else %}
+                        <button class="btn btn-success" onclick="toggleTimezone({{ tz.id }}, true)">
+                            ✅ Enable
+                        </button>
+                    {% endif %}
+                    <button class="btn btn-danger" onclick="deleteTimezone({{ tz.id }}, '{{ tz.offset_str }}')">
+                        🗑️ Delete
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card" style="background: #e8f4f8; border-left: 4px solid #3498db;">
+    <h3 style="margin-top: 0;">💡 Tips</h3>
+    
+    <h4>Which Timezones to Add?</h4>
+    <p>Add timezones where your clients are likely to be located. For most practices, 5-10 timezones is sufficient.</p>
+    
+    <h4>Display Names</h4>
+    <p>Use city names that your clients will recognize. You can list multiple cities: "Moscow, Istanbul, Minsk"</p>
+    
+    <h4>Sort Order</h4>
+    <p>Put your most common client timezones at the top (lower sort order numbers). This makes booking faster for most users.</p>
+    
+    <h4>Disabling vs Deleting</h4>
+    <p>If a timezone is temporarily not needed, <strong>disable</strong> it instead of deleting. Disabled timezones can be re-enabled later without losing the configuration.</p>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Show/hide add form
+function showAddForm() {
+    document.getElementById('addForm').style.display = 'block';
+    document.getElementById('addForm').scrollIntoView({ behavior: 'smooth' });
+}
+
+function hideAddForm() {
+    document.getElementById('addForm').style.display = 'none';
+    document.getElementById('addTimezoneForm').reset();
+    document.getElementById('addMessage').innerHTML = '';
+}
+
+// Add timezone form handler
+document.getElementById('addTimezoneForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const sign = formData.get('offset_sign');
+    const hours = parseInt(formData.get('offset_hours'));
+    const minutes = parseInt(formData.get('offset_minutes'));
+    
+    // Build offset string
+    let offset_str = 'UTC' + sign + hours;
+    if (minutes > 0) {
+        offset_str += ':' + (minutes < 10 ? '0' : '') + minutes;
+    }
+    
+    // Calculate offset in minutes
+    let offset_minutes = (hours * 60) + minutes;
+    if (sign === '-') {
+        offset_minutes = -offset_minutes;
+    }
+    
+    const data = new FormData();
+    data.append('offset_str', offset_str);
+    data.append('offset_minutes', offset_minutes);
+    data.append('display_name', formData.get('display_name'));
+    data.append('sort_order', formData.get('sort_order'));
+    
+    const response = await fetch('/admin/timezones/add', {
+        method: 'POST',
+        body: data
+    });
+    
+    const messageDiv = document.getElementById('addMessage');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Timezone added successfully!</div>';
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail}</div>`;
+    }
+});
+
+// Toggle timezone active status
+async function toggleTimezone(id, activate) {
+    const action = activate ? 'enable' : 'disable';
+    
+    const response = await fetch(`/admin/timezones/${id}/${action}`, {
+        method: 'POST'
+    });
+    
+    if (response.ok) {
+        location.reload();
+    } else {
+        alert('Failed to update timezone');
+    }
+}
+
+// Update display name
+async function updateDisplayName(id) {
+    const displayName = document.getElementById(`display-${id}`).value;
+    
+    const formData = new FormData();
+    formData.append('display_name', displayName);
+    
+    const response = await fetch(`/admin/timezones/${id}/update`, {
+        method: 'POST',
+        body: formData
+    });
+    
+    if (response.ok) {
+        // Brief visual feedback
+        const input = document.getElementById(`display-${id}`);
+        input.style.backgroundColor = '#d4edda';
+        setTimeout(() => {
+            input.style.backgroundColor = '';
+        }, 1000);
+    } else {
+        alert('Failed to update display name');
+    }
+}
+
+// Update sort order
+async function updateSortOrder(id, sortOrder) {
+    const formData = new FormData();
+    formData.append('sort_order', sortOrder);
+    
+    const response = await fetch(`/admin/timezones/${id}/update`, {
+        method: 'POST',
+        body: formData
+    });
+    
+    if (!response.ok) {
+        alert('Failed to update sort order');
+        location.reload();
+    }
+}
+
+// Delete timezone
+async function deleteTimezone(id, offsetStr) {
+    if (!confirm(`Delete timezone ${offsetStr}? This action cannot be undone.`)) {
+        return;
+    }
+    
+    const response = await fetch(`/admin/timezones/${id}/delete`, {
+        method: 'POST'
+    });
+    
+    if (response.ok) {
+        document.getElementById(`tz-row-${id}`).remove();
+    } else {
+        const error = await response.json();
+        alert(`Failed to delete: ${error.detail || 'Unknown error'}`);
+    }
+}
+</script>
+{% endblock %}

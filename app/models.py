@@ -194,3 +194,41 @@ class PendingNotification(Base):
     
     # Relationship
     request = relationship("Request", back_populates="notifications")
+# ============================================================================
+# v1.1 NEW: TIMEZONE MANAGEMENT
+# ============================================================================
+
+class Timezone(Base):
+    """
+    Admin-configurable timezones for client selection.
+    Replaces hardcoded timezone dropdowns/text input.
+    """
+    __tablename__ = 'timezones'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    offset_str = Column(String(10), unique=True, nullable=False)  # "UTC+4", "UTC-5"
+    offset_minutes = Column(Integer, nullable=False)  # 240, -300 (for calculations)
+    display_name = Column(String(100), nullable=False)  # "Yerevan, Dubai (Armenia/UAE)"
+    is_active = Column(Boolean, default=True, index=True)
+    sort_order = Column(Integer, default=0)  # For custom ordering
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<Timezone {self.offset_str}: {self.display_name}>"
+
+
+# ============================================================================
+# DEFAULT TIMEZONE DATA (for seeding)
+# ============================================================================
+
+DEFAULT_TIMEZONES = [
+    {"offset_str": "UTC+4", "offset_minutes": 240, "display_name": "Yerevan, Dubai, Baku", "sort_order": 1},
+    {"offset_str": "UTC+3", "offset_minutes": 180, "display_name": "Moscow, Istanbul, Minsk", "sort_order": 2},
+    {"offset_str": "UTC+2", "offset_minutes": 120, "display_name": "Kyiv, Athens, Helsinki", "sort_order": 3},
+    {"offset_str": "UTC+1", "offset_minutes": 60, "display_name": "Berlin, Paris, Rome", "sort_order": 4},
+    {"offset_str": "UTC+0", "offset_minutes": 0, "display_name": "London, Lisbon, Dublin", "sort_order": 5},
+    {"offset_str": "UTC-5", "offset_minutes": -300, "display_name": "New York, Toronto, Miami", "sort_order": 6},
+    {"offset_str": "UTC-8", "offset_minutes": -480, "display_name": "Los Angeles, Vancouver", "sort_order": 7},
+]

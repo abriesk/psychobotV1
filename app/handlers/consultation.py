@@ -1,7 +1,7 @@
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters, CallbackQueryHandler
-from app.db import AsyncSessionLocal
-from app.models import User, Request, RequestType, RequestStatus
+from app.db import AsyncSessionLocal, get_active_timezones
+from app.models import User, Request, RequestType, RequestStatus, Timezone
 from app.utils import get_settings
 from app.translations import get_text
 from sqlalchemy import select
@@ -14,7 +14,8 @@ import os
 
 # States
 TYPE_SELECT, TIMEZONE, TIME, PROBLEM, CONTACTS, WAITLIST_CONTACTS = range(6)
-SLOT_SELECT = 6  # New state for slot selection
+SLOT_SELECT = 6  # State for slot selection
+TIMEZONE_SELECT = 7  # NEW: State for timezone button selection
 
 # 🔧 HELPER: Create home keyboard with lang
 def get_home_keyboard(lang):
@@ -24,7 +25,7 @@ def get_home_keyboard(lang):
         resize_keyboard=True
     )
 
-# 🔧 NEW HELPER: Get main menu keyboard
+# 🔧 HELPER: Get main menu keyboard
 def get_main_menu_keyboard(lang):
     """Returns the full main menu keyboard"""
     menu = [
@@ -34,6 +35,7 @@ def get_main_menu_keyboard(lang):
         [get_text(lang, "menu_home")]
     ]
     return ReplyKeyboardMarkup(menu, resize_keyboard=True)
+
 
 async def start_consultation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -49,7 +51,6 @@ async def start_consultation(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Waitlist flow
         await update.message.reply_text(get_text(lang, "waitlist_intro"))
         
-        # 🔧 CHANGED: Add home button to waitlist flow
         await update.message.reply_text(
             get_text(lang, "ask_problem"),
             reply_markup=get_home_keyboard(lang)
@@ -70,6 +71,7 @@ async def start_consultation(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=ReplyKeyboardMarkup(kb, one_time_keyboard=True, resize_keyboard=True)
         )
         return TYPE_SELECT
+
 
 async def type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = context.user_data.get('lang', 'ru')
@@ -97,49 +99,189 @@ async def type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return TIMEZONE
 
+
 async def timezone_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ask for user's timezone, then show available slots"""
+    """
+    Determine consultation type and show timezone selection buttons.
+    v1.1: Uses inline buttons from database instead of text input.
+    """
     lang = context.user_data.get('lang', 'ru')
     text = update.message.text
     
     # Determine consultation type
-    if "Individual" in text or "Индивидуальная" in text or "Անհատական" in text:
+    if "Individual" in text or "Индивидуальная" in text or "Անdelays" in text:
         context.user_data['req_type'] = RequestType.INDIVIDUAL
     else:
         context.user_data['req_type'] = RequestType.COUPLE
     
-    # Ask for timezone (UTC offset format)
+    # Get active timezones from database
+    timezones = await get_active_timezones()
+    
+    if not timezones:
+        # Fallback to text input if no timezones configured
+        tz_prompt = {
+            'ru': (
+                "🌍 <b>Ваш часовой пояс</b>\n\n"
+                "Укажите ваш UTC часовой пояс.\n"
+                "Формат: UTC+X или UTC-X\n\n"
+                "Примеры: UTC+4, UTC+3, UTC-5"
+            ),
+            'am': (
+                "🌍 <b>Ձdelays delays գdelays</b>\n\n"
+                "delays delays UTC delays delays.\n"
+                "delays: UTC+X delays UTC-X"
+            )
+        }.get(lang, "Enter your timezone (UTC+X or UTC-X):")
+        
+        await update.message.reply_text(
+            tz_prompt,
+            reply_markup=get_home_keyboard(lang),
+            parse_mode="HTML"
+        )
+        return SLOT_SELECT  # Will parse text input
+    
+    # Build timezone buttons (2 per row for better UX)
+    buttons = []
+    row = []
+    for i, tz in enumerate(timezones):
+        btn_text = f"🌍 {tz.offset_str}"
+        callback_data = f"tz_{tz.id}_{tz.offset_minutes}"
+        row.append(InlineKeyboardButton(btn_text, callback_data=callback_data))
+        
+        if len(row) == 2 or i == len(timezones) - 1:
+            buttons.append(row)
+            row = []
+    
+    # Add cancel button
+    cancel_text = {
+        'ru': "❌ Отмена",
+        'am': "❌ delays"
+    }.get(lang, "❌ Cancel")
+    buttons.append([InlineKeyboardButton(cancel_text, callback_data="tz_cancel")])
+    
     tz_prompt = {
         'ru': (
-            "🌍 <b>Ваш часовой пояс</b>\n\n"
-            "Укажите ваш UTC часовой пояс.\n\n"
-            "Формат: UTC+X или UTC-X\n\n"
-            "Примеры:\n"
-            "• UTC+4 (Ереван)\n"
-            "• UTC+3 (Москва)\n"
-            "• UTC+2 (Киев)\n"
-            "• UTC-5 (Нью-Йорк)"
+            "🌍 <b>Выберите ваш часовой пояс:</b>\n\n"
+            "Это нужно для корректного отображения времени консультаций."
         ),
         'am': (
-            "🌍 <b>Ձեր ժամային գոտին</b>\n\n"
-            "Նշեք ձեր UTC ժամային գոտին.\n\n"
-            "Ֆորմատ: UTC+X կամ UTC-X\n\n"
-            "Օրինակներ:\n"
-            "• UTC+4 (Երևան)\n"
-            "• UTC+3 (Մոսկվա)"
+            "🌍 <b>delays delays delays delays:</b>\n\n"
+            "delays delays delays delays delays delays."
         )
-    }.get(lang, "Enter your timezone (UTC+X or UTC-X):")
+    }.get(lang, "Select your timezone:")
     
     await update.message.reply_text(
         tz_prompt,
-        reply_markup=get_home_keyboard(lang),
+        reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="HTML"
     )
-    return SLOT_SELECT
+    
+    return TIMEZONE_SELECT
+
+
+async def timezone_button_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle timezone button selection.
+    v1.1: New handler for inline timezone buttons.
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    lang = context.user_data.get('lang', 'ru')
+    
+    if query.data == "tz_cancel":
+        await query.edit_message_text(
+            get_text(lang, "booking_cancelled") or "Booking cancelled."
+        )
+        return ConversationHandler.END
+    
+    # Parse callback data: tz_{id}_{offset_minutes}
+    parts = query.data.split('_')
+    if len(parts) < 3:
+        await query.edit_message_text("Error: Invalid timezone selection.")
+        return ConversationHandler.END
+    
+    tz_id = int(parts[1])
+    offset_minutes = int(parts[2])
+    
+    # Get timezone details from database
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Timezone).where(Timezone.id == tz_id))
+        timezone = result.scalar_one_or_none()
+        
+        if not timezone:
+            await query.edit_message_text("Error: Timezone not found.")
+            return ConversationHandler.END
+        
+        # Store timezone info
+        context.user_data['timezone'] = timezone.offset_str
+        context.user_data['tz_offset'] = timezone.offset_minutes
+        
+        # Get available slots
+        is_online = context.user_data.get('is_online', True)
+        slots = await get_available_slots(session, is_online=is_online, limit=10)
+        
+        if not slots:
+            # No slots available → fallback to text input
+            no_slots_msg = {
+                'ru': (
+                    f"✅ Часовой пояс: {timezone.offset_str} ({timezone.display_name})\n\n"
+                    "⚠️ К сожалению, сейчас нет доступных слотов.\n\n"
+                    "Укажите желаемое время и дату:"
+                ),
+                'am': (
+                    f"✅ delays delays: {timezone.offset_str} ({timezone.display_name})\n\n"
+                    "⚠️ delays, delays delays delays delays delays.\n\n"
+                    "delays delays delays delays delays:"
+                )
+            }.get(lang, f"Timezone: {timezone.offset_str}\n\nNo slots available. Enter desired time:")
+            
+            await query.edit_message_text(no_slots_msg)
+            return TIME
+        
+        # Build slot buttons
+        buttons = []
+        for slot in slots:
+            slot_text = format_slot_time(slot, offset_minutes)
+            callback_data = f"slot_{slot.id}"
+            buttons.append([InlineKeyboardButton(f"📅 {slot_text}", callback_data=callback_data)])
+        
+        # Add "other time" option
+        other_time_text = {
+            'ru': "⏰ Другое время",
+            'am': "⏰ delays delays"
+        }.get(lang, "⏰ Other time")
+        buttons.append([InlineKeyboardButton(other_time_text, callback_data="slot_other")])
+        
+        select_slot_msg = {
+            'ru': (
+                f"✅ Часовой пояс: <b>{timezone.offset_str}</b>\n"
+                f"📍 {timezone.display_name}\n\n"
+                f"📅 <b>Доступные слоты:</b>\n"
+                f"Выберите удобное время:"
+            ),
+            'am': (
+                f"✅ delays delays: <b>{timezone.offset_str}</b>\n"
+                f"📍 {timezone.display_name}\n\n"
+                f"📅 <b>delays delays:</b>\n"
+                f"delays delays delays:"
+            )
+        }.get(lang, f"Timezone: {timezone.offset_str}\n\nAvailable slots:")
+        
+        await query.edit_message_text(
+            select_slot_msg,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML"
+        )
+        
+        return PROBLEM  # Will handle via slot callback
 
 
 async def slot_select_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Parse timezone and show available slots"""
+    """
+    Parse timezone text input (fallback) and show available slots.
+    Used when no timezones are configured in database.
+    """
     lang = context.user_data.get('lang', 'ru')
     tz_str = update.message.text.strip()
     
@@ -148,7 +290,7 @@ async def slot_select_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if offset is None:
         error_msg = {
             'ru': "❌ Неверный формат часового пояса.\n\nИспользуйте: UTC+4 или UTC-5",
-            'am': "❌ Սխալ ժամային գոտու ձևաչափ.\n\nՕգտագործեք: UTC+4 կամ UTC-5"
+            'am': "❌ delays delays delays delays.\n\ndelays: UTC+4 delays UTC-5"
         }.get(lang, "Invalid timezone format. Use: UTC+4 or UTC-5")
         
         await update.message.reply_text(error_msg)
@@ -162,28 +304,18 @@ async def slot_select_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_online = context.user_data.get('is_online', True)
     
     async with AsyncSessionLocal() as session:
-        slots = await get_available_slots(
-            session,
-            is_online=is_online,
-            limit=10
-        )
+        slots = await get_available_slots(session, is_online=is_online, limit=10)
         
         if not slots:
             # No slots available → fallback to text input
             no_slots_msg = {
                 'ru': (
                     "⚠️ К сожалению, сейчас нет доступных слотов.\n\n"
-                    "Вы можете:\n"
-                    "1. Указать желаемое время свободным текстом\n"
-                    "2. Вернуться позже\n\n"
                     "Укажите желаемое время и дату:"
                 ),
                 'am': (
-                    "⚠️ Ցավոք, այս պահին հասանելի սլոթեր չկան։\n\n"
-                    "Կարող եք:\n"
-                    "1. Նշել ցանկալի ժամանակը ազատ տեքստով\n"
-                    "2. Վերադառնալ ավելի ուշ\n\n"
-                    "Նշեք ցանկալի ժամանակն ու ամսաթիվը:"
+                    "⚠️ delays, delays delays delays delays delays.\n\n"
+                    "delays delays delays delays delays:"
                 )
             }.get(lang, "No slots available. Please enter your desired time:")
             
@@ -191,7 +323,6 @@ async def slot_select_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 no_slots_msg,
                 reply_markup=get_home_keyboard(lang)
             )
-            # Continue to old flow (text input)
             return TIME
         
         # Build slot buttons
@@ -204,13 +335,13 @@ async def slot_select_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Add "other time" option
         other_time_text = {
             'ru': "⏰ Другое время (свободный текст)",
-            'am': "⏰ Այլ ժամանակ (ազատ տեքստ)"
+            'am': "⏰ delays delays (delays delays)"
         }.get(lang, "Other time (free text)")
         buttons.append([InlineKeyboardButton(other_time_text, callback_data="slot_other")])
         
         select_slot_msg = {
             'ru': f"✅ Часовой пояс: {tz_str}\n\n📅 <b>Доступные слоты:</b>\n\nВыберите удобное время:",
-            'am': f"✅ Ժամային գոտի: {tz_str}\n\n📅 <b>Հասանելի սլոթեր:</b>\n\nԸնտրեք հարմար ժամանակ:"
+            'am': f"✅ delays delays: {tz_str}\n\n📅 <b>delays delays:</b>\n\ndelays delays delays:"
         }.get(lang, f"Timezone: {tz_str}\n\nAvailable slots:")
         
         await update.message.reply_text(
@@ -233,7 +364,7 @@ async def slot_selected_callback(update: Update, context: ContextTypes.DEFAULT_T
         # User wants to enter time manually
         other_time_prompt = {
             'ru': "⏰ Укажите желаемое время и дату свободным текстом:",
-            'am': "⏰ Նշեք ցանկալի ժամանակն ու ամսաթիվը:"
+            'am': "⏰ delays delays delays delays delays:"
         }.get(lang, "Enter your desired time:")
         
         await query.edit_message_text(other_time_prompt)
@@ -250,11 +381,10 @@ async def slot_selected_callback(update: Update, context: ContextTypes.DEFAULT_T
         if not success:
             error_msg = {
                 'ru': f"❌ {message}\n\nСлот больше не доступен. Выберите другой:",
-                'am': f"❌ {message}\n\nՍլոթը այլևս հասանելի չէ։ Ընտրեք այլ:"
+                'am': f"❌ {message}\n\ndelays delays delays delays. delays delays:"
             }.get(lang, f"Error: {message}")
             
             await query.edit_message_text(error_msg)
-            # Show slots again
             return SLOT_SELECT
         
         # Store selected slot
@@ -275,9 +405,9 @@ async def slot_selected_callback(update: Update, context: ContextTypes.DEFAULT_T
                 f"{get_text(lang, 'ask_problem')}"
             ),
             'am': (
-                f"✅ <b>Սլոթը ամրագրված է!</b>\n\n"
+                f"✅ <b>delays delays!</b>\n\n"
                 f"📅 {slot_time_str}\n\n"
-                f"⏰ Ձեզ մոտ 15 րոպե կա ամրագրումն ավարտելու համար։\n\n"
+                f"⏰ delays delays 15 delays delays delays delays delays.\n\n"
                 f"{get_text(lang, 'ask_problem')}"
             )
         }.get(lang, f"Slot held: {slot_time_str}\n\n{get_text(lang, 'ask_problem')}")
@@ -286,31 +416,44 @@ async def slot_selected_callback(update: Update, context: ContextTypes.DEFAULT_T
         
         return PROBLEM
 
-async def time_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['timezone'] = update.message.text
-    lang = context.user_data.get('lang', 'ru')
-    
-    # 🔧 CHANGED: Keep home button visible
-    await update.message.reply_text(
-        get_text(lang, "ask_time"),
-        reply_markup=get_home_keyboard(lang)
-    )
-    return PROBLEM
 
-async def problem_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def time_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle free-text time input (fallback when no slots)"""
     context.user_data['desired_time'] = update.message.text
     lang = context.user_data.get('lang', 'ru')
     
-    # 🔧 CHANGED: Keep home button visible
     await update.message.reply_text(
         get_text(lang, "ask_problem"),
         reply_markup=get_home_keyboard(lang)
     )
     return CONTACTS
 
+
+async def problem_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Capture problem description"""
+    # Check if this is from slot flow or text flow
+    if 'selected_slot_id' in context.user_data:
+        # Slot flow: problem was asked after slot selection
+        context.user_data['problem'] = update.message.text
+        return await contacts_step(update, context)
+    else:
+        # Text flow: store desired_time, ask for problem
+        context.user_data['desired_time'] = update.message.text
+        lang = context.user_data.get('lang', 'ru')
+        
+        await update.message.reply_text(
+            get_text(lang, "ask_problem"),
+            reply_markup=get_home_keyboard(lang)
+        )
+        return CONTACTS
+
+
 async def contacts_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Finalize request and confirm slot booking"""
-    context.user_data['problem'] = update.message.text
+    # Get problem if not already set
+    if 'problem' not in context.user_data:
+        context.user_data['problem'] = update.message.text
+    
     lang = context.user_data.get('lang', 'ru')
     
     # Create request
@@ -319,7 +462,7 @@ async def contacts_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id=update.effective_user.id,
             type=context.user_data['req_type'],
             timezone=context.user_data.get('timezone'),
-            desired_time=context.user_data.get('desired_time'),  # May be None if slot-based
+            desired_time=context.user_data.get('desired_time'),
             problem=context.user_data['problem'],
             status=RequestStatus.PENDING
         )
@@ -335,10 +478,9 @@ async def contacts_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
             success, message = await confirm_slot_booking(session, selected_slot_id, req.id)
             
             if not success:
-                # Slot booking failed (expired hold, etc.)
                 error_msg = {
                     'ru': f"❌ Не удалось забронировать слот: {message}",
-                    'am': f"❌ Չհաջողվեց ամրագրել սլոթը: {message}"
+                    'am': f"❌ delays delays delays delays: {message}"
                 }.get(lang, f"Booking failed: {message}")
                 
                 await update.message.reply_text(error_msg)
@@ -354,16 +496,16 @@ async def contacts_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'ru': (
                     f"✅ <b>Запись подтверждена!</b>\n\n"
                     f"📅 {slot_time_str}\n"
-                    f"🆔 Номер заявки: {req.request_uuid}\n\n"
+                    f"🆔 Номер заявки: {req.request_uuid[:8]}\n\n"
                     f"Я свяжусь с вами для подтверждения деталей."
                 ),
                 'am': (
-                    f"✅ <b>Ամրագրումը հաստատված է!</b>\n\n"
+                    f"✅ <b>delays delays!</b>\n\n"
                     f"📅 {slot_time_str}\n"
-                    f"🆔 Հայտի համար: {req.request_uuid}\n\n"
-                    f"Ես կկապնվեմ ձեզ հետ՝ մանրամասները հաստատելու համար։"
+                    f"🆔 delays delays: {req.request_uuid[:8]}\n\n"
+                    f"delays delays delays delays delays delays delays."
                 )
-            }.get(lang, f"Booking confirmed!\n{slot_time_str}\nRequest: {req.request_uuid}")
+            }.get(lang, f"Booking confirmed!\n{slot_time_str}\nRequest: {req.request_uuid[:8]}")
             
             await update.message.reply_text(confirm_msg, parse_mode="HTML")
             
@@ -380,6 +522,7 @@ async def contacts_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📋 <b>New Booking Request</b>\n\n"
             f"UUID: <code>{req.request_uuid}</code>\n"
             f"Type: {req.type.value}\n"
+            f"Timezone: {req.timezone or 'N/A'}\n"
             f"{'Slot-based' if selected_slot_id else 'Text-based'}\n"
             f"Problem: {req.problem[:100] if req.problem else 'N/A'}"
         )
@@ -396,15 +539,19 @@ async def contacts_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     print(f"Failed to notify admin {admin_id}: {e}")
     
+    # Clear user data
+    context.user_data.clear()
+    context.user_data['lang'] = lang
+    
     await update.message.reply_text(
         get_text(lang, "welcome_back"),
         reply_markup=get_main_menu_keyboard(lang)
     )
     return ConversationHandler.END
 
+
 async def waitlist_finalize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = context.user_data.get('lang', 'ru')
-    problem = context.user_data.get('temp_problem', 'No details')
     text = update.message.text
     
     async with AsyncSessionLocal() as session:
@@ -420,7 +567,6 @@ async def waitlist_finalize(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Notify Admin
         admin_text = f"⏳ <b>Waitlist Add</b>\nUser: {update.effective_user.id}\nData: {text}"
         
-        # 🔧 FIXED: Convert admin_id to int and handle errors
         admin_ids = os.getenv("ADMIN_IDS", "")
         if admin_ids:
             for admin_id in admin_ids.split(","):
@@ -436,16 +582,14 @@ async def waitlist_finalize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         get_text(lang, "confirm_sent"),
         reply_markup=get_main_menu_keyboard(lang)
-        #reply_markup=ReplyKeyboardRemove()  # Remove for final message
     )
     return ConversationHandler.END
 
-# Waitlist entry captures problem then contacts
+
 async def waitlist_capture_problem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['temp_problem'] = update.message.text
     lang = context.user_data.get('lang', 'ru')
     
-    # 🔧 CHANGED: Keep home button visible
     await update.message.reply_text(
         get_text(lang, "waitlist_contacts"),
         reply_markup=get_home_keyboard(lang)

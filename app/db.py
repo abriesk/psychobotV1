@@ -1,4 +1,4 @@
-# app/db.py - v1.0 with auto-population on fresh install
+# app/db.py - v1.1 with timezone auto-population
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -28,7 +28,7 @@ async def init_db():
     
     print("✅ Database schema initialized.")
     
-    # Auto-populate translations if table is empty (fresh install)
+    # Auto-populate defaults (translations, settings, timezones)
     await _populate_defaults()
 
 
@@ -37,16 +37,17 @@ async def _populate_defaults():
     Populate default data for fresh installations.
     Idempotent - safe to run multiple times.
     """
-    from app.models import Translation, Settings
+    from app.models import Translation, Settings, Timezone, DEFAULT_TIMEZONES
     from app.translations import TEXTS_DEFAULTS
     
     async with AsyncSessionLocal() as session:
-        # Check if translations exist
+        # ====================================================================
+        # TRANSLATIONS
+        # ====================================================================
         result = await session.execute(select(Translation).limit(1))
         if not result.scalar_one_or_none():
             print("📝 Translations table empty - populating from defaults...")
             
-            # Populate from TEXTS_DEFAULTS
             count = 0
             for lang, texts in TEXTS_DEFAULTS.items():
                 for key, value in texts.items():
@@ -57,7 +58,9 @@ async def _populate_defaults():
             await session.commit()
             print(f"✅ Populated {count} translations from TEXTS_DEFAULTS")
         
-        # Ensure Settings row exists
+        # ====================================================================
+        # SETTINGS
+        # ====================================================================
         result = await session.execute(select(Settings).where(Settings.id == 1))
         if not result.scalar_one_or_none():
             print("⚙️  Creating default settings row...")
@@ -65,3 +68,57 @@ async def _populate_defaults():
             session.add(settings)
             await session.commit()
             print("✅ Default settings created")
+        
+        # ====================================================================
+        # TIMEZONES (NEW v1.1)
+        # ====================================================================
+        result = await session.execute(select(Timezone).limit(1))
+        if not result.scalar_one_or_none():
+            print("🌍 Timezones table empty - populating defaults...")
+            
+            for tz_data in DEFAULT_TIMEZONES:
+                timezone = Timezone(
+                    offset_str=tz_data["offset_str"],
+                    offset_minutes=tz_data["offset_minutes"],
+                    display_name=tz_data["display_name"],
+                    is_active=True,
+                    sort_order=tz_data["sort_order"]
+                )
+                session.add(timezone)
+            
+            await session.commit()
+            print(f"✅ Populated {len(DEFAULT_TIMEZONES)} default timezones")
+
+
+# ============================================================================
+# TIMEZONE HELPERS (for use in handlers)
+# ============================================================================
+
+async def get_active_timezones():
+    """
+    Get all active timezones, ordered by sort_order.
+    Used by Telegram bot and web interface.
+    """
+    from app.models import Timezone
+    
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Timezone)
+            .where(Timezone.is_active == True)
+            .order_by(Timezone.sort_order, Timezone.offset_minutes)
+        )
+        return result.scalars().all()
+
+
+async def get_timezone_by_offset(offset_str: str):
+    """
+    Get timezone by offset string (e.g., "UTC+4").
+    Returns None if not found.
+    """
+    from app.models import Timezone
+    
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Timezone).where(Timezone.offset_str == offset_str)
+        )
+        return result.scalar_one_or_none()
