@@ -12,19 +12,19 @@ version: '3.8'
 
 services:
   # ============================================================================
-  # Nginx Proxy Manager - Reverse proxy with GUI
-  # Configure SSL certificates and Basic Auth for /admin here
+  # OPTION 1: Nginx Proxy Manager (Profile: npm)
+  # Starts only if COMPOSE_PROFILES=npm in .env
   # ============================================================================
   npm:
     image: 'jc21/nginx-proxy-manager:latest'
     container_name: psychobot-npm
+    profiles: ["npm"]
     ports:
-      - '80:80'      # HTTP (redirects to HTTPS)
-      - '443:443'    # HTTPS
-      - '81:81'      # NPM Admin UI - Consider firewall/VPN protection
+      - '80:80'
+      - '443:443'
+      - '81:81'
     environment:
       DB_SQLITE_FILE: "/data/database.sqlite"
-      # Disable telemetry
       DISABLE_IPV6: 'true'
     volumes:
       - ./data/npm/data:/data
@@ -32,12 +32,25 @@ services:
     restart: always
     networks:
       - psychobot-network
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 128M
+    depends_on:
+      - web
+
+  # ============================================================================
+  # OPTION 2: Cloudflare Tunnel (Profile: cloudflare)
+  # Starts only if COMPOSE_PROFILES=cloudflare in .env
+  # ============================================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: psychobot-tunnel
+    profiles: ["cloudflare"]
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    restart: always
+    networks:
+      - psychobot-network
+    depends_on:
+      - web
 
   # ============================================================================
   # FastAPI Web Backend
