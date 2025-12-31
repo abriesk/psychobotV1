@@ -1,73 +1,162 @@
+# docker-compose.prod.yml - Production Configuration
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+#
+# Features:
+# - Code baked into image (rebuild for updates)
+# - PostgreSQL data on host filesystem for easy backup
+# - No debug ports exposed
+# - Resource limits defined
+# - Optimized for stability
+
 version: '3.8'
 
 services:
+  # ============================================================================
   # Nginx Proxy Manager - Reverse proxy with GUI
+  # Configure SSL certificates and Basic Auth for /admin here
+  # ============================================================================
   npm:
     image: 'jc21/nginx-proxy-manager:latest'
+    container_name: psychobot-npm
     ports:
-      - '80:80'      # HTTP
+      - '80:80'      # HTTP (redirects to HTTPS)
       - '443:443'    # HTTPS
-      - '81:81'      # NPM Admin UI
+      - '81:81'      # NPM Admin UI - Consider firewall/VPN protection
     environment:
       DB_SQLITE_FILE: "/data/database.sqlite"
+      # Disable telemetry
+      DISABLE_IPV6: 'true'
     volumes:
-      - ./npm/data:/data
-      - ./npm/letsencrypt:/etc/letsencrypt
-    restart: unless-stopped
+      - ./data/npm/data:/data
+      - ./data/npm/letsencrypt:/etc/letsencrypt
+    restart: always
     networks:
       - psychobot-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
+  # ============================================================================
   # FastAPI Web Backend
+  # Protected by NPM - not directly accessible
+  # ============================================================================
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: psychobot-web
     env_file: .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
     expose:
-      - "8000"  # Only accessible via NPM
+      - "8000"
+    # No ports exposed - only accessible via NPM
     volumes:
+      # Read-only code mount (or remove for fully baked image)
+      - ./app:/app/app:ro
       - ./landings:/app/landings
+      - ./alembic:/app/alembic:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
     depends_on:
       db:
         condition: service_healthy
-    command: ["uvicorn", "app.web.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    restart: unless-stopped
+    # Production: no reload, workers for concurrency
+    command: >
+      uvicorn app.web.main:app 
+      --host 0.0.0.0 
+      --port 8000 
+      --workers 2
+      --log-level warning
+    restart: always
     networks:
       - psychobot-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
+  # ============================================================================
   # Telegram Bot
+  # Main client-facing interface
+  # ============================================================================
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: psychobot-bot
     env_file: .env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
     volumes:
+      - ./app:/app/app:ro
       - ./landings:/app/landings
+      - ./alembic:/app/alembic:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
     depends_on:
       db:
         condition: service_healthy
     command: ["python", "-m", "app.main"]
-    restart: unless-stopped
+    restart: always
     networks:
       - psychobot-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
+  # ============================================================================
   # PostgreSQL Database
+  # Data persisted to host - BACKUP REGULARLY!
+  # ============================================================================
   db:
     image: postgres:15
+    container_name: psychobot-db
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Performance tuning for small VPS
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    # No ports exposed - only accessible within network
+    expose:
+      - "5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
+      # Custom PostgreSQL config (optional)
+      # - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-psychobot}"]
+      interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
+    restart: always
     networks:
       - psychobot-network
-
-volumes:
-  postgres_data:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
 networks:
   psychobot-network:
     driver: bridge
+    name: psychobot-prod-network
