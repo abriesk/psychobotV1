@@ -5,7 +5,7 @@ from telegram.ext import filters as tg_filters
 from app.db import init_db
 from app.handlers import common, consultation, admin, user_negotiation
 from app.translations import load_translations_cache
-from app.scheduler import start_scheduler, stop_scheduler
+from app.scheduler import start_scheduler, stop_scheduler, set_bot_instance  # Added set_bot_instance
 
 # Import dynamic custom filters
 import app.filters as custom_filters
@@ -23,6 +23,10 @@ async def post_init(application):
     # Load translations from DB into memory cache
     await load_translations_cache()
     print("✅ Translation cache loaded - filters are now language-agnostic!")
+    
+    # Register bot instance for scheduler notifications (Web → Telegram bridge)
+    set_bot_instance(application.bot)
+    print("✅ Bot instance registered with scheduler for web notifications.")
     
     # Start scheduler for background jobs
     start_scheduler()
@@ -286,9 +290,9 @@ def main():
     app.add_handler(CallbackQueryHandler(user_negotiation.user_negotiation_yes, pattern="^usr_yes_"))
     
     # Main Menu Navigation (lowest priority)
-     # Landing page buttons handler (Terms, Qualification, About)
+    # Exclude all menu buttons to avoid conflicts
     app.add_handler(MessageHandler(
-        custom_filters.landing_buttons, 
+        tg_filters.TEXT & ~tg_filters.COMMAND & ~custom_filters.all_menu_buttons, 
         common.handle_menu_click
     ))
 

@@ -18,7 +18,8 @@ from typing import Optional
 
 from app.models import (
     Slot, SlotStatus, Request as BookingRequest, RequestStatus,
-    Settings, Translation, Negotiation, SenderType
+    Settings, Translation, Negotiation, SenderType,
+    PendingNotification, NotificationType  # NEW: For web→bot notifications
 )
 from app.utils_slots import (
     parse_utc_offset, user_tz_to_utc, validate_slot_time,
@@ -338,10 +339,7 @@ async def propose_alternative(
 ):
     """
     Admin proposes alternative time to client (negotiation).
-    Creates a negotiation record.
-    
-    Note: For Telegram users, they will see the proposal next time they 
-    interact with the bot, or you can implement async notification.
+    Creates a negotiation record and queues Telegram notification.
     """
     # Get the request
     result = await session.execute(
@@ -371,23 +369,27 @@ async def propose_alternative(
     if final_time:
         booking.final_time = final_time
     
-    await session.commit()
-    
-    # Check if this is a Telegram user we could notify
+    # Queue Telegram notification for bot to send
     telegram_notified = False
     if booking.user_id and booking.user_id != 0:
-        # Log the proposal - in production you'd send via message queue to bot
-        print(f"💬 Proposal for Telegram user {booking.user_id}:")
-        print(f"   Message: {proposal}")
-        print(f"   Request UUID: {booking.request_uuid}")
-        # TODO: Implement async notification via Redis pub/sub or similar
-        # For now, the user will see it when they check their request status
-        telegram_notified = False
+        notification = PendingNotification(
+            user_id=booking.user_id,
+            request_id=request_id,
+            notification_type=NotificationType.PROPOSAL,
+            message=proposal,
+            proposed_time=final_time,
+            created_at=datetime.utcnow()
+        )
+        session.add(notification)
+        telegram_notified = True  # Queued for delivery
+        print(f"📬 Queued proposal notification for user {booking.user_id}")
+    
+    await session.commit()
     
     return {
         "success": True,
         "telegram_notified": telegram_notified,
-        "message": "Proposal recorded successfully"
+        "message": "Proposal sent!" if telegram_notified else "Proposal recorded (web booking - no Telegram notification)"
     }
 
 
@@ -399,14 +401,16 @@ async def propose_alternative(
 async def convert_waitlist_to_booking(
     request_id: int,
     consultation_type: str = Form(...),
-    desired_time: Optional[str] = Form(None),
+    slot_id: Optional[int] = Form(None),
+    proposal_message: Optional[str] = Form(None),
     session: AsyncSession = Depends(get_db)
 ):
     """
     Convert a waitlist entry to an active booking request.
-    Used when availability opens up and admin contacts the waiting client.
+    Optionally assign a slot and send Telegram notification.
     """
     from app.models import RequestType
+    import httpx
     
     # Get the request
     result = await session.execute(
@@ -431,23 +435,101 @@ async def convert_waitlist_to_booking(
     except KeyError:
         raise HTTPException(400, f"Invalid consultation type: {consultation_type}")
     
-    # Update the request
+    # Update the request type
     booking.type = new_type
-    booking.status = RequestStatus.PENDING  # Reset to pending for slot assignment
-    if desired_time:
-        booking.desired_time = desired_time
+    
+    # Handle slot assignment
+    slot_time_display = None
+    if slot_id:
+        slot_result = await session.execute(
+            select(Slot).where(Slot.id == slot_id).with_for_update()
+        )
+        slot = slot_result.scalar_one_or_none()
+        
+        if not slot:
+            raise HTTPException(400, f"Slot {slot_id} not found")
+        
+        if slot.status != SlotStatus.AVAILABLE:
+            raise HTTPException(400, f"Slot {slot_id} is not available")
+        
+        # Assign slot
+        booking.slot_id = slot_id
+        booking.scheduled_datetime = slot.start_time
+        slot.status = SlotStatus.HELD  # Hold until user confirms
+        
+        # Format slot time for display
+        slot_time_display = f"{slot.start_time.strftime('%Y-%m-%d %H:%M')} UTC"
+        
+        # Set status to NEGOTIATING since we're proposing a time
+        booking.status = RequestStatus.NEGOTIATING
+    else:
+        # No slot - just convert to PENDING
+        booking.status = RequestStatus.PENDING
+    
+    # Create negotiation entry if message provided
+    if proposal_message:
+        negotiation = Negotiation(
+            request_id=request_id,
+            sender=SenderType.ADMIN,
+            message=proposal_message,
+            timestamp=datetime.utcnow()
+        )
+        session.add(negotiation)
     
     await session.commit()
+    
+    # Try to send Telegram notification
+    telegram_notified = False
+    if booking.user_id and booking.user_id != 0 and proposal_message:
+        bot_token = os.getenv("BOT_TOKEN")
+        if bot_token:
+            try:
+                # Build inline keyboard for accept/counter
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "✅ Accept", "callback_data": f"usr_yes_{request_id}"}],
+                        [{"text": "💬 Propose Different Time", "callback_data": f"usr_counter_{request_id}"}]
+                    ]
+                }
+                
+                message_text = f"📋 <b>Update on your consultation request</b>\n\n{proposal_message}"
+                if slot_time_display:
+                    message_text += f"\n\n📅 Proposed time: {slot_time_display}"
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={
+                            "chat_id": booking.user_id,
+                            "text": message_text,
+                            "parse_mode": "HTML",
+                            "reply_markup": keyboard
+                        },
+                        timeout=10.0
+                    )
+                    
+                    if response.status_code == 200:
+                        telegram_notified = True
+                        print(f"📱 Telegram notification sent to user {booking.user_id}")
+                    else:
+                        print(f"⚠️ Telegram API error: {response.text}")
+                        
+            except Exception as e:
+                print(f"⚠️ Failed to send Telegram notification: {e}")
     
     # Log conversion
     print(f"🔄 Waitlist entry {booking.request_uuid} converted to {new_type.value}")
     print(f"   User: {booking.user_id}")
-    if desired_time:
-        print(f"   Desired time: {desired_time}")
+    if slot_time_display:
+        print(f"   Slot assigned: {slot_time_display}")
     
     return {
         "success": True,
         "new_type": new_type.value,
+        "slot_assigned": slot_id is not None,
+        "slot_time": slot_time_display,
+        "telegram_notified": telegram_notified,
+        "user_id": booking.user_id,
         "message": f"Converted to {new_type.value} booking"
     }
 

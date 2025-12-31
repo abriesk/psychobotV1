@@ -19,15 +19,15 @@
         </div>
         <div>
             <strong>Status:</strong><br>
-            {% if booking.status.value == 'PENDING' %}
+            {% if booking.status.value|lower == 'pending' %}
                 <span style="color: #f39c12; font-weight: bold;">⏳ Pending</span>
-            {% elif booking.status.value == 'NEGOTIATING' %}
+            {% elif booking.status.value|lower == 'negotiating' %}
                 <span style="color: #3498db; font-weight: bold;">💬 Negotiating</span>
-            {% elif booking.status.value == 'CONFIRMED' %}
+            {% elif booking.status.value|lower == 'confirmed' %}
                 <span style="color: #27ae60; font-weight: bold;">✅ Confirmed</span>
-            {% elif booking.status.value == 'REJECTED' %}
+            {% elif booking.status.value|lower == 'rejected' %}
                 <span style="color: #e74c3c; font-weight: bold;">❌ Rejected</span>
-            {% elif booking.status.value == 'CANCELED' %}
+            {% elif booking.status.value|lower == 'canceled' %}
                 <span style="color: #95a5a6; font-weight: bold;">🚫 Canceled</span>
             {% else %}
                 {{ booking.status.value }}
@@ -123,10 +123,10 @@
 </div>
 
 <!-- Actions Section - Only for actionable statuses -->
-{% if booking.status.value in ['PENDING', 'NEGOTIATING'] %}
+{% if booking.status.value|lower in ['pending', 'negotiating'] %}
 
     <!-- WAITLIST-SPECIFIC ACTIONS -->
-    {% if booking.type.value == 'WAITLIST' %}
+    {% if booking.type.value|lower == 'waitlist' %}
     <div class="card" style="border: 2px solid #f39c12; background: #fffbf0;">
         <h3>📋 Waitlist Actions</h3>
         <p style="color: #7f8c8d; margin-bottom: 1.5rem;">
@@ -148,30 +148,42 @@
     
     <!-- Convert to Booking Modal -->
     <div id="convertModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
-        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 8px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
             <h3 style="margin-top: 0;">🔄 Convert to Booking</h3>
-            <p>Convert this waitlist entry to an active booking request.</p>
+            <p>Convert this waitlist entry to an active booking and optionally assign a slot.</p>
             
             <form id="convertForm" onsubmit="convertToBooking(event)">
                 <div class="form-group">
                     <label>Consultation Type:</label>
-                    <select name="consultation_type" id="convertType" required>
+                    <select name="consultation_type" id="convertType" required onchange="loadAvailableSlots()">
                         <option value="INDIVIDUAL">Individual (60 min)</option>
                         <option value="COUPLE">Couple (90 min)</option>
                     </select>
                 </div>
                 
                 <div class="form-group">
-                    <label>Desired Time (from your conversation with client):</label>
-                    <input type="text" name="desired_time" id="convertTime"
-                           placeholder="e.g., Friday afternoons, weekends, etc.">
+                    <label>Assign Slot (optional):</label>
+                    <div id="slotsList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 0.5rem;">
+                        <p style="color: #7f8c8d; text-align: center;">Loading available slots...</p>
+                    </div>
+                    <input type="hidden" name="slot_id" id="selectedSlotId">
+                    <small style="color: #7f8c8d;">If no slot selected, request becomes PENDING for manual scheduling.</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Message to Client (for Telegram notification):</label>
+                    <textarea name="proposal_message" id="proposalMessage" rows="3"
+                              placeholder="Example: We now have availability! I can offer you the slot above. Does this work for you?"></textarea>
+                    <small style="color: #7f8c8d;">This message will be sent to the client via Telegram (if they're a Telegram user).</small>
                 </div>
                 
                 <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-                    <button type="submit" class="btn btn-success">Convert</button>
+                    <button type="submit" class="btn btn-success">🔄 Convert & Notify Client</button>
                     <button type="button" onclick="closeConvertModal()" class="btn">Cancel</button>
                 </div>
             </form>
+            
+            <div id="convertMessage" style="margin-top: 1rem;"></div>
         </div>
     </div>
     
@@ -247,7 +259,7 @@
 <div class="card" style="background: #ecf0f1;">
     <h3>ℹ️ Request {{ booking.status.value | capitalize }}</h3>
     <p>This request is <strong>{{ booking.status.value }}</strong> and cannot be modified.</p>
-    {% if booking.status.value == 'CONFIRMED' and booking.final_time %}
+    {% if booking.status.value|lower == 'confirmed' and booking.final_time %}
         <p style="color: #27ae60;"><strong>Confirmed Time:</strong> {{ booking.final_time }}</p>
     {% endif %}
     {% if booking.cancelled_at %}
@@ -257,7 +269,7 @@
 {% endif %}
 
 <!-- Reminder Status -->
-{% if booking.reminder_24h_sent or booking.reminder_1h_sent or booking.status.value == 'CONFIRMED' %}
+{% if booking.reminder_24h_sent or booking.reminder_1h_sent or booking.status.value|lower == 'confirmed' %}
 <div class="card" style="background: #f0f8ff;">
     <h3>🔔 Reminder Status</h3>
     <p>24h Reminder: {{ '✅ Sent' if booking.reminder_24h_sent else '⏳ Pending' }}</p>
@@ -412,14 +424,74 @@ async function rejectRequest(reqId) {
 // WAITLIST-SPECIFIC FUNCTIONS
 // ============================================================================
 
-// Show convert modal
+// Show convert modal and load slots
 function showConvertModal() {
     document.getElementById('convertModal').style.display = 'block';
+    loadAvailableSlots();
 }
 
 // Close convert modal
 function closeConvertModal() {
     document.getElementById('convertModal').style.display = 'none';
+    document.getElementById('selectedSlotId').value = '';
+}
+
+// Load available slots for selection
+async function loadAvailableSlots() {
+    const container = document.getElementById('slotsList');
+    container.innerHTML = '<p style="color: #7f8c8d; text-align: center;">Loading...</p>';
+    
+    try {
+        const response = await fetch('/api/slots/available?is_online=true&limit=20');
+        const data = await response.json();
+        
+        if (!data.slots || data.slots.length === 0) {
+            container.innerHTML = `
+                <p style="color: #e74c3c; text-align: center; padding: 1rem;">
+                    ⚠️ No available slots.<br>
+                    <a href="/admin/slots" target="_blank">Create slots first</a>
+                </p>
+            `;
+            return;
+        }
+        
+        let html = '<div style="display: flex; flex-direction: column; gap: 0.5rem;">';
+        html += `<label style="padding: 0.5rem; background: #f8f9fa; border-radius: 4px; cursor: pointer;">
+                    <input type="radio" name="slot_select" value="" checked 
+                           onchange="selectSlot('')" style="margin-right: 0.5rem;">
+                    <em>No slot (manual scheduling later)</em>
+                 </label>`;
+        
+        for (const slot of data.slots) {
+            html += `
+                <label style="padding: 0.5rem; background: #e8f4f8; border-radius: 4px; cursor: pointer; border: 1px solid #3498db;">
+                    <input type="radio" name="slot_select" value="${slot.id}" 
+                           onchange="selectSlot('${slot.id}', '${slot.display_time}')" 
+                           style="margin-right: 0.5rem;">
+                    📅 ${slot.display_time} (${slot.duration_minutes} min)
+                </label>
+            `;
+        }
+        html += '</div>';
+        
+        container.innerHTML = html;
+        
+    } catch (err) {
+        container.innerHTML = `<p style="color: #e74c3c;">Failed to load slots: ${err.message}</p>`;
+    }
+}
+
+// Handle slot selection
+function selectSlot(slotId, displayTime) {
+    document.getElementById('selectedSlotId').value = slotId;
+    
+    // Auto-fill proposal message if slot selected
+    if (slotId && displayTime) {
+        const msgField = document.getElementById('proposalMessage');
+        if (!msgField.value.trim()) {
+            msgField.value = `Good news! We now have availability. I can offer you: ${displayTime}. Does this time work for you?`;
+        }
+    }
 }
 
 // Convert waitlist to booking
@@ -427,15 +499,19 @@ async function convertToBooking(event) {
     event.preventDefault();
     
     const consultationType = document.getElementById('convertType').value;
-    const desiredTime = document.getElementById('convertTime').value;
+    const slotId = document.getElementById('selectedSlotId').value;
+    const proposalMessage = document.getElementById('proposalMessage').value;
     
-    const messageDiv = document.getElementById('waitlistMessage');
+    const messageDiv = document.getElementById('convertMessage');
     messageDiv.innerHTML = '<span style="color: #3498db;">🔄 Converting...</span>';
     
     const formData = new FormData();
     formData.append('consultation_type', consultationType);
-    if (desiredTime) {
-        formData.append('desired_time', desiredTime);
+    if (slotId) {
+        formData.append('slot_id', slotId);
+    }
+    if (proposalMessage) {
+        formData.append('proposal_message', proposalMessage);
     }
     
     try {
@@ -447,13 +523,27 @@ async function convertToBooking(event) {
         if (response.ok) {
             const result = await response.json();
             closeConvertModal();
-            messageDiv.innerHTML = `
+            
+            const waitlistMsg = document.getElementById('waitlistMessage');
+            let successHtml = `
                 <div class="alert alert-success">
                     ✅ Successfully converted to ${result.new_type} booking!<br>
-                    Status is now PENDING - you can assign a slot or approve directly.
-                </div>
             `;
-            setTimeout(() => location.reload(), 2000);
+            
+            if (result.slot_assigned) {
+                successHtml += `📅 Slot assigned: ${result.slot_time}<br>`;
+            }
+            
+            if (result.telegram_notified) {
+                successHtml += `📱 Client notified via Telegram<br>`;
+            } else if (result.user_id && result.user_id !== 0) {
+                successHtml += `⚠️ Telegram notification pending (will be sent when bot processes queue)<br>`;
+            }
+            
+            successHtml += '</div>';
+            waitlistMsg.innerHTML = successHtml;
+            
+            setTimeout(() => location.reload(), 3000);
         } else {
             const error = await response.json();
             messageDiv.innerHTML = `<div class="alert alert-error">❌ Error: ${error.detail || 'Conversion failed'}</div>`;

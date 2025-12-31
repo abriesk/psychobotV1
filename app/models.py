@@ -1,4 +1,4 @@
-# app/models.py - v1.0 FIXED (Relationship ambiguity resolved)
+# app/models.py - v1.0.2 with Notification Queue
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, BigInteger, Text, ForeignKey, DateTime, Enum, UniqueConstraint, JSON
@@ -30,6 +30,14 @@ class SlotStatus(enum.Enum):
     AVAILABLE = "available"
     BOOKED = "booked"
     HELD = "held"
+
+class NotificationType(enum.Enum):
+    """Types of notifications the bot can send"""
+    PROPOSAL = "proposal"           # Admin proposes time to client
+    CONFIRMATION = "confirmation"   # Booking confirmed
+    REJECTION = "rejection"         # Booking rejected
+    REMINDER = "reminder"           # Upcoming session reminder
+    CUSTOM = "custom"               # Custom message
 
 # ============================================================================
 # CORE TABLES
@@ -83,13 +91,9 @@ class Slot(Base):
     is_online = Column(Boolean, default=True)
     status = Column(Enum(SlotStatus), default=SlotStatus.AVAILABLE, index=True)
     
-    # 🔧 FIXED: Removed request_id FK from Slot
-    # Only Request -> Slot relationship exists now (simpler, no ambiguity)
-    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # 🔧 FIXED: Specify foreign_keys explicitly
     requests = relationship(
         "Request", 
         back_populates="slot",
@@ -117,7 +121,7 @@ class Request(Base):
     status = Column(Enum(RequestStatus), default=RequestStatus.PENDING)
     final_time = Column(String, nullable=True)
     
-    # v1.0: Slot-based scheduling (ONLY FK from Request to Slot)
+    # v1.0: Slot-based scheduling
     slot_id = Column(Integer, ForeignKey('slots.id'), nullable=True)
     scheduled_datetime = Column(DateTime, nullable=True)
     
@@ -135,13 +139,12 @@ class Request(Base):
     # Relationships
     user = relationship("User", back_populates="requests")
     negotiations = relationship("Negotiation", back_populates="request")
-    
-    # 🔧 FIXED: Explicitly specify foreign_keys
     slot = relationship(
         "Slot", 
         back_populates="requests",
         foreign_keys=[slot_id]
     )
+    notifications = relationship("PendingNotification", back_populates="request")
 
 # ============================================================================
 # NEGOTIATION HISTORY
@@ -156,3 +159,38 @@ class Negotiation(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     request = relationship("Request", back_populates="negotiations")
+
+# ============================================================================
+# v1.0.2 NEW: TELEGRAM NOTIFICATION QUEUE
+# ============================================================================
+
+class PendingNotification(Base):
+    """
+    Queue for notifications that web UI wants bot to send.
+    Bot polls this table and sends Telegram messages.
+    """
+    __tablename__ = 'pending_notifications'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Target user
+    user_id = Column(BigInteger, nullable=False, index=True)  # Telegram user ID
+    
+    # Related request (optional)
+    request_id = Column(Integer, ForeignKey('requests.id'), nullable=True)
+    
+    # Notification content
+    notification_type = Column(Enum(NotificationType), nullable=False)
+    message = Column(Text, nullable=False)  # Message to send
+    
+    # For proposals: store the proposed time so bot can create buttons
+    proposed_time = Column(String, nullable=True)
+    
+    # Status tracking
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    sent_at = Column(DateTime, nullable=True, index=True)  # NULL = pending, set = sent
+    error = Column(Text, nullable=True)  # Error message if send failed
+    attempts = Column(Integer, default=0)  # Retry counter
+    
+    # Relationship
+    request = relationship("Request", back_populates="notifications")
