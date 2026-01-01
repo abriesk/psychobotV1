@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '002_add_timezone_options'
-down_revision = '001_v1_0_schema'
+revision = '003_add_timezone_options'
+down_revision = '002_notification_queue'
 branch_labels = None
 depends_on = None
 
