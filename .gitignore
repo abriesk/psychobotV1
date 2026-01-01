@@ -2,3 +2,4 @@
 app/handlers/admin.py.bak
 app/handlers/consultation.py.bak
 app/main.py.bak
+*.bak
