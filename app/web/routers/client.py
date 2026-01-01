@@ -169,29 +169,29 @@ async def submit_booking(
     # Note: We don't have user_id from web (no Telegram), use placeholder
     # Admin will see this is a web booking
     # Creates booking with PENDING status
-booking = BookingRequest(
-    request_uuid=request_uuid,
-    user_id=0,  # Placeholder for web bookings
-    type=req_type,
-    timezone=timezone,
-    problem=problem,
-    preferred_comm=contact_method,
-    status=RequestStatus.PENDING,
-    slot_id=slot_id
-)
+    booking = BookingRequest(
+        request_uuid=request_uuid,
+        user_id=0,  # Placeholder for web bookings
+        type=req_type,
+        timezone=timezone,
+        problem=problem,
+        preferred_comm=contact_method,
+        status=RequestStatus.PENDING,
+        slot_id=slot_id
+    )
 
-session.add(booking)
-await session.commit()
-await session.refresh(booking)
+    session.add(booking)
+    await session.commit()           # ← Now correctly inside the async function
+    await session.refresh(booking)   # ← Same here
 
-# ✅ NEW: Protect slot from 15-min timeout by marking as BOOKED
-# But keep request as PENDING (therapist must approve)
-success, msg = await confirm_slot_booking(
-    session,
-    slot_id,
-    booking.id,
-    auto_confirm_request=False  # ← Don't auto-confirm
-)
+    # ✅ NEW: Protect slot from 15-min timeout by marking as BOOKED
+    # But keep request as PENDING (therapist must approve)
+    success, msg = await confirm_slot_booking(
+        session,
+        slot_id,
+        booking.id,
+        auto_confirm_request=False  # ← Don't auto-confirm
+    )
 
 if not success:
     # Rollback: delete the booking we just created
