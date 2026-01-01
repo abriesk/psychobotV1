@@ -166,9 +166,6 @@ async def submit_booking(
     # Create booking request
     request_uuid = str(uuid.uuid4())
     
-    # Note: We don't have user_id from web (no Telegram), use placeholder
-    # Admin will see this is a web booking
-    # Creates booking with PENDING status
     booking = BookingRequest(
         request_uuid=request_uuid,
         user_id=0,  # Placeholder for web bookings
@@ -181,44 +178,41 @@ async def submit_booking(
     )
 
     session.add(booking)
-    await session.commit()           # ← Now correctly inside the async function
-    await session.refresh(booking)   # ← Same here
+    await session.commit()
+    await session.refresh(booking)
 
-    # ✅ NEW: Protect slot from 15-min timeout by marking as BOOKED
-    # But keep request as PENDING (therapist must approve)
+    # Protect slot from timeout by marking as BOOKED, but keep request PENDING
     success, msg = await confirm_slot_booking(
         session,
         slot_id,
         booking.id,
-        auto_confirm_request=False  # ← Don't auto-confirm
+        auto_confirm_request=False
     )
 
-if not success:
-    # Rollback: delete the booking we just created
-    await session.delete(booking)
-    await session.commit()
-    raise HTTPException(400, f"Booking failed: {msg}")
-    
-    # Get slot details for response
+    if not success:
+        # Rollback on failure
+        await session.delete(booking)
+        await session.commit()
+        raise HTTPException(400, f"Booking failed: {msg}")
+
+    # Success path: prepare response data
     slot_result = await session.execute(select(Slot).where(Slot.id == slot_id))
     slot = slot_result.scalar_one()
-    
-    # Get offset from timezone
+
     tz_result = await session.execute(
         select(Timezone).where(Timezone.offset_str == timezone)
     )
     tz = tz_result.scalar_one_or_none()
-    offset_minutes = tz.offset_minutes if tz else parse_utc_offset(timezone) or 0
-    
+    offset_minutes = tz.offset_minutes if tz else (parse_utc_offset(timezone) or 0)
+
     slot_time = format_slot_time(slot, offset_minutes)
-    
+
     return {
         "success": True,
         "request_uuid": request_uuid,
         "slot_time": slot_time,
         "message": "Booking request submitted. You will be contacted for confirmation."
     }
-
 
 @router.get("/api/translations/{lang}")
 async def get_translations(lang: str):
