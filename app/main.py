@@ -296,10 +296,10 @@ def main():
     # User negotiation callbacks
     app.add_handler(CallbackQueryHandler(user_negotiation.user_negotiation_yes, pattern="^usr_yes_"))
     
-    # Main Menu Navigation (lowest priority)
-    # Exclude all menu buttons to avoid conflicts
+    # Main Menu Navigation
+    # Catch landing buttons (Terms, Qual, About)
     app.add_handler(MessageHandler(
-        tg_filters.TEXT & ~tg_filters.COMMAND & ~custom_filters.all_menu_buttons, 
+        custom_filters.landing_buttons, 
         common.handle_menu_click
     ))
 
