@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block header_title %}Timezone Management{% endblock %}
+{% block title %}Manage Timezones{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <a href="/admin" class="btn">← Back to Dashboard</a>
+    <a href="/admin/settings" class="btn">⚙️ Settings</a>
+</div>
+
+<div class="card">
+    <h2>🌍 Timezone Options</h2>
+    <p>Manage timezone buttons shown to clients during booking. Changes take effect immediately.</p>
+    
+    <div style="margin: 1.5rem 0;">
+        <button onclick="showAddForm()" class="btn btn-success">➕ Add Timezone</button>
+    </div>
+    
+    <!-- Add Form (hidden by default) -->
+    <div id="addForm" style="display: none; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
+        <h3 style="margin-top: 0;">Add New Timezone</h3>
+        <form id="timezoneAddForm">
+            <div class="form-group">
+                <label>UTC Offset Code:</label>
+                <input type="text" name="code" placeholder="e.g., UTC+2 or UTC-5" required 
+                       pattern="UTC[+-]\d{1,2}(:\d{2})?" title="Format: UTC+X or UTC-X">
+                <small style="color: #7f8c8d;">Format: UTC+4, UTC-5, UTC+5:30</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Label (Russian):</label>
+                <input type="text" name="label_ru" placeholder="e.g., Тель-Авив" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Label (Armenian):</label>
+                <input type="text" name="label_am" placeholder="e.g., Delays -Delays delays">
+            </div>
+            
+            <div class="form-group">
+                <label>Emoji Flag (optional):</label>
+                <input type="text" name="emoji" placeholder="e.g., 🇮🇱" maxlength="4">
+                <small style="color: #7f8c8d;">Use country flag emoji</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Display Order:</label>
+                <input type="number" name="order" value="{{ (timezones|length) + 1 }}" min="1" required>
+                <small style="color: #7f8c8d;">Lower numbers appear first</small>
+            </div>
+            
+            <button type="submit" class="btn btn-success">💾 Add Timezone</button>
+            <button type="button" onclick="hideAddForm()" class="btn">Cancel</button>
+        </form>
+        <div id="addMessage" style="margin-top: 1rem;"></div>
+    </div>
+    
+    <!-- Existing Timezones -->
+    <h3>Current Timezone Options</h3>
+    <p style="color: #7f8c8d; margin-bottom: 1rem;">
+        Drag to reorder (coming soon) or use order numbers. {{ timezones|length }} timezone(s) configured.
+    </p>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Code</th>
+                <th>Emoji</th>
+                <th>Russian</th>
+                <th>Armenian</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="timezoneList">
+            {% if timezones %}
+                {% for tz in timezones %}
+                <tr data-code="{{ tz.code }}">
+                    <td>{{ tz.order or loop.index }}</td>
+                    <td><code>{{ tz.code }}</code></td>
+                    <td style="font-size: 1.5rem;">{{ tz.emoji or '🌍' }}</td>
+                    <td>{{ tz.label.ru if tz.label else '-' }}</td>
+                    <td>{{ tz.label.am if tz.label else '-' }}</td>
+                    <td>
+                        <button class="btn" onclick="editTimezone('{{ tz.code }}')" style="padding: 0.4rem 0.8rem;">
+                            ✏️ Edit
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteTimezone('{{ tz.code }}')" style="padding: 0.4rem 0.8rem;">
+                            🗑️ Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; color: #7f8c8d;">
+                        No timezones configured. Add your first one above!
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Edit Modal -->
+<div id="editModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem; border-radius: 8px; max-width: 500px; width: 90%;">
+        <h2>Edit Timezone</h2>
+        <form id="editForm">
+            <input type="hidden" name="original_code" id="editOriginalCode">
+            
+            <div class="form-group">
+                <label>UTC Offset Code:</label>
+                <input type="text" name="code" id="editCode" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Label (Russian):</label>
+                <input type="text" name="label_ru" id="editLabelRu" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Label (Armenian):</label>
+                <input type="text" name="label_am" id="editLabelAm">
+            </div>
+            
+            <div class="form-group">
+                <label>Emoji:</label>
+                <input type="text" name="emoji" id="editEmoji" maxlength="4">
+            </div>
+            
+            <div class="form-group">
+                <label>Order:</label>
+                <input type="number" name="order" id="editOrder" min="1">
+            </div>
+            
+            <button type="submit" class="btn btn-success">💾 Save Changes</button>
+            <button type="button" onclick="closeEditModal()" class="btn">Cancel</button>
+        </form>
+        <div id="editMessage" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+<div class="card" style="background: #e8f4f8; border-left: 4px solid #3498db;">
+    <h3 style="margin-top: 0;">💡 Tips</h3>
+    <ul>
+        <li><strong>Common timezones:</strong> Add the ones your clients actually use</li>
+        <li><strong>Order matters:</strong> Put most common timezones first (lower order number)</li>
+        <li><strong>Emoji:</strong> Use country flag emojis for visual recognition</li>
+        <li><strong>Multi-language:</strong> Add labels in all languages you support</li>
+    </ul>
+    
+    <h4>Popular Timezone Codes</h4>
+    <table style="font-size: 0.9rem; margin-top: 0.5rem;">
+        <tr><td><code>UTC+4</code></td><td>Yerevan, Dubai, Baku</td></tr>
+        <tr><td><code>UTC+3</code></td><td>Moscow, Istanbul, Minsk</td></tr>
+        <tr><td><code>UTC+2</code></td><td>Kyiv, Tel Aviv, Athens</td></tr>
+        <tr><td><code>UTC+1</code></td><td>Berlin, Paris, Rome</td></tr>
+        <tr><td><code>UTC+0</code></td><td>London, Lisbon</td></tr>
+        <tr><td><code>UTC-5</code></td><td>New York, Toronto</td></tr>
+        <tr><td><code>UTC-8</code></td><td>Los Angeles, Vancouver</td></tr>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Store current timezones for editing
+const currentTimezones = {{ timezones | tojson | safe }};
+
+// Show/hide add form
+function showAddForm() {
+    document.getElementById('addForm').style.display = 'block';
+}
+
+function hideAddForm() {
+    document.getElementById('addForm').style.display = 'none';
+    document.getElementById('timezoneAddForm').reset();
+    document.getElementById('addMessage').innerHTML = '';
+}
+
+// Add timezone
+document.getElementById('timezoneAddForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/admin/timezones/add', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const messageDiv = document.getElementById('addMessage');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Timezone added!</div>';
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ ${error.detail}</div>`;
+    }
+});
+
+// Edit timezone
+function editTimezone(code) {
+    const tz = currentTimezones.find(t => t.code === code);
+    if (!tz) return;
+    
+    document.getElementById('editOriginalCode').value = code;
+    document.getElementById('editCode').value = tz.code;
+    document.getElementById('editLabelRu').value = tz.label?.ru || '';
+    document.getElementById('editLabelAm').value = tz.label?.am || '';
+    document.getElementById('editEmoji').value = tz.emoji || '';
+    document.getElementById('editOrder').value = tz.order || 1;
+    
+    document.getElementById('editModal').style.display = 'block';
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+    document.getElementById('editForm').reset();
+    document.getElementById('editMessage').innerHTML = '';
+}
+
+// Save edit
+document.getElementById('editForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const response = await fetch('/admin/timezones/update', {
+        method: 'POST',
+        body: formData
+    });
+    
+    const messageDiv = document.getElementById('editMessage');
+    
+    if (response.ok) {
+        messageDiv.innerHTML = '<div class="alert alert-success">✅ Saved!</div>';
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        const error = await response.json();
+        messageDiv.innerHTML = `<div class="alert alert-error">❌ ${error.detail}</div>`;
+    }
+});
+
+// Delete timezone
+async function deleteTimezone(code) {
+    if (!confirm(`Delete timezone ${code}?`)) return;
+    
+    const response = await fetch(`/admin/timezones/delete?code=${encodeURIComponent(code)}`, {
+        method: 'POST'
+    });
+    
+    if (response.ok) {
+        location.reload();
+    } else {
+        const error = await response.json();
+        alert(`Error: ${error.detail}`);
+    }
+}
+</script>
+{% endblock %}

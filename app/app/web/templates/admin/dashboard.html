@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block header_title %}Admin Dashboard{% endblock %}
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <h3 style="margin-top: 0; margin-bottom: 1rem;">📋 Management</h3>
+    <a href="/admin/slots" class="btn">📅 Manage Slots</a>
+    <a href="/admin/requests" class="btn">📋 View Requests</a>
+    
+    <h3 style="margin-top: 1.5rem; margin-bottom: 1rem;">⚙️ Configuration</h3>
+    <a href="/admin/settings" class="btn">⚙️ Settings</a>
+    <a href="/admin/timezones" class="btn">🌍 Timezones</a>
+    <a href="/admin/landings" class="btn">📄 Landing Pages</a>
+    
+    <h3 style="margin-top: 1.5rem; margin-bottom: 1rem;">🌍 Internationalization</h3>
+    <a href="/admin/translations" class="btn">📝 Edit Translations</a>
+    <a href="/admin/languages" class="btn btn-success">➕ Add Language</a>
+</div>
+
+<h2>Statistics</h2>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total_requests }}</div>
+        <div class="stat-label">Total Requests</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.pending_requests }}</div>
+        <div class="stat-label">Pending</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.upcoming_slots }}</div>
+        <div class="stat-label">Available Slots</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.booked_slots }}</div>
+        <div class="stat-label">Booked Slots</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>🎯 Quick Start Guide</h3>
+    
+    <h4>1. Configure Your Practice</h4>
+    <ul>
+        <li><a href="/admin/settings">Settings</a> - Set prices, availability, and policies</li>
+        <li><a href="/admin/timezones">Timezones</a> - Configure timezone options for clients</li>
+        <li><a href="/admin/landings">Landing Pages</a> - Upload content for "About", "Terms", etc.</li>
+    </ul>
+    
+    <h4>2. Create Available Time Slots</h4>
+    <ul>
+        <li><a href="/admin/slots">Slot Management</a> - Add consultation times for clients to book</li>
+    </ul>
+    
+    <h4>3. Manage Bookings</h4>
+    <ul>
+        <li><a href="/admin/requests">View Requests</a> - Approve or reject booking requests</li>
+    </ul>
+    
+    <h4>4. Multilingual Support (Optional)</h4>
+    <ul>
+        <li><a href="/admin/languages">Add Language</a> - Add English, German, French, etc.</li>
+        <li><a href="/admin/translations">Edit Translations</a> - Customize button text</li>
+    </ul>
+</div>
+
+<div class="card" style="background: #e8f4f8; border-left: 4px solid #3498db;">
+    <h3 style="margin-top: 0;">ℹ️ System Information</h3>
+    <p><strong>Version:</strong> PsychoBot v1.0.1</p>
+    <p><strong>Mode:</strong> Admin Panel (Protected by Nginx Proxy Manager)</p>
+    <p><strong>Telegram Bot:</strong> Active and monitoring for new bookings</p>
+    <p><strong>New in v1.0.1:</strong> Timezone button selection for clients</p>
+</div>
+{% endblock %}

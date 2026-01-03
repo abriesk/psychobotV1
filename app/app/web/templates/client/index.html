@@ -1,0 +1,475 @@
+{% extends "base.html" %}
+
+{% block title %}Psychotherapy Booking - Professional Support{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Hero Section */
+    .hero {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 3rem 0;
+        margin: -20px -20px 2rem -20px;
+        text-align: center;
+    }
+    
+    .hero h1 {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        font-weight: 600;
+    }
+    
+    .hero p {
+        font-size: 1.2rem;
+        opacity: 0.95;
+        max-width: 700px;
+        margin: 0 auto 2rem;
+    }
+    
+    .hero-cta {
+        display: inline-flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .btn-hero {
+        background: white;
+        color: #667eea;
+        padding: 1rem 2.5rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+        border-radius: 50px;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .btn-hero:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    
+    .btn-hero-secondary {
+        background: rgba(255,255,255,0.2);
+        color: white;
+        border: 2px solid white;
+    }
+    
+    /* Language Switcher */
+    .language-switcher {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        display: flex;
+        gap: 0.5rem;
+        background: rgba(255,255,255,0.9);
+        padding: 0.5rem;
+        border-radius: 25px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .language-switcher a {
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        text-decoration: none;
+        color: #667eea;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    
+    .language-switcher a.active {
+        background: #667eea;
+        color: white;
+    }
+    
+    .language-switcher a:hover:not(.active) {
+        background: rgba(102, 126, 234, 0.1);
+    }
+    
+    /* Tabs */
+    .tabs-container {
+        margin: 2rem 0;
+    }
+    
+    .tabs {
+        display: flex;
+        gap: 0.5rem;
+        border-bottom: 2px solid #ecf0f1;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+    
+    .tab {
+        padding: 1rem 1.5rem;
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        font-weight: 500;
+        color: #7f8c8d;
+        border-bottom: 3px solid transparent;
+        transition: all 0.3s;
+        position: relative;
+        top: 2px;
+    }
+    
+    .tab:hover {
+        color: #667eea;
+    }
+    
+    .tab.active {
+        color: #667eea;
+        border-bottom-color: #667eea;
+    }
+    
+    .tab-content {
+        display: none;
+        animation: fadeIn 0.3s;
+    }
+    
+    .tab-content.active {
+        display: block;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .landing-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        line-height: 1.8;
+    }
+    
+    .landing-content h1,
+    .landing-content h2,
+    .landing-content h3 {
+        color: #2c3e50;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .landing-content h1 { font-size: 2rem; }
+    .landing-content h2 { font-size: 1.5rem; }
+    .landing-content h3 { font-size: 1.2rem; }
+    
+    .landing-content ul,
+    .landing-content ol {
+        margin: 1rem 0 1rem 2rem;
+    }
+    
+    .landing-content li {
+        margin: 0.5rem 0;
+    }
+    
+    .landing-content a {
+        color: #667eea;
+        text-decoration: none;
+        border-bottom: 1px solid rgba(102, 126, 234, 0.3);
+    }
+    
+    .landing-content a:hover {
+        border-bottom-color: #667eea;
+    }
+    
+    .landing-content code {
+        background: #f8f9fa;
+        padding: 0.2rem 0.4rem;
+        border-radius: 3px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+    }
+    
+    .landing-content pre {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 5px;
+        overflow-x: auto;
+        border-left: 4px solid #667eea;
+    }
+    
+    /* No Content Message */
+    .no-content {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin: 2rem 0;
+    }
+    
+    .no-content h3 {
+        color: #7f8c8d;
+        margin-bottom: 1rem;
+    }
+    
+    /* Floating Booking Button */
+    .floating-book-btn {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        background: #667eea;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 50px;
+        text-decoration: none;
+        font-weight: 600;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+        z-index: 1000;
+        transition: all 0.3s;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .floating-book-btn:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 25px rgba(102, 126, 234, 0.5);
+        background: #5568d3;
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+        .hero h1 {
+            font-size: 2rem;
+        }
+        
+        .hero p {
+            font-size: 1rem;
+        }
+        
+        .language-switcher {
+            position: static;
+            margin: 1rem auto;
+            width: fit-content;
+        }
+        
+        .tabs {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .tab {
+            white-space: nowrap;
+        }
+        
+        .landing-content {
+            padding: 1rem;
+        }
+        
+        .floating-book-btn {
+            bottom: 15px;
+            right: 15px;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.9rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Language Switcher -->
+<div class="language-switcher">
+    {% for lang_code, lang_name in languages.items() %}
+    <a href="/?lang={{ lang_code }}" 
+       class="{% if lang_code == lang %}active{% endif %}">
+        {{ lang_name }}
+    </a>
+    {% endfor %}
+</div>
+
+<!-- Hero Section -->
+<div class="hero">
+    <div style="max-width: 900px; margin: 0 auto; padding: 0 20px; position: relative;">
+        <h1>
+            {% if lang == 'ru' %}
+                Профессиональная психотерапевтическая поддержка
+            {% elif lang == 'am' %}
+                Մասնագիտական հոգեթերապևտիկ օգնություն
+            {% else %}
+                Professional Psychotherapy Support
+            {% endif %}
+        </h1>
+        
+        <p>
+            {% if lang == 'ru' %}
+                Онлайн и очные консультации. Индивидуальная и парная терапия. Запись в удобное для вас время.
+            {% elif lang == 'am' %}
+                Առցանց և ներկայացման խորհրդատվություններ։ Անհատական և զույգերի թերապիա։ Ձեզ հարմար ժամանակ։
+            {% else %}
+                Online and in-person consultations. Individual and couples therapy. Flexible scheduling.
+            {% endif %}
+        </p>
+        
+        <div class="hero-cta">
+            <a href="/book?lang={{ lang }}" class="btn-hero">
+                📅 
+                {% if lang == 'ru' %}
+                    Записаться на консультацию
+                {% elif lang == 'am' %}
+                    Գրանցվել խորհրդատվության
+                {% else %}
+                    Book Consultation
+                {% endif %}
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Content Sections with Tabs -->
+{% if has_content %}
+<div class="tabs-container">
+    <div class="tabs" role="tablist">
+        {% for topic_key, landing in landings.items() %}
+        <button class="tab {% if loop.index == 1 %}active{% endif %}" 
+                onclick="switchTab(event, '{{ topic_key }}')" 
+                role="tab"
+                aria-selected="{% if loop.index == 1 %}true{% else %}false{% endif %}">
+            {{ landing.title }}
+        </button>
+        {% endfor %}
+    </div>
+    
+    {% for topic_key, landing in landings.items() %}
+    <div id="{{ topic_key }}" class="tab-content {% if loop.index == 1 %}active{% endif %}" role="tabpanel">
+        <div class="landing-content">
+            {{ landing.content|safe }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="no-content">
+    <h3>
+        {% if lang == 'ru' %}
+            📝 Информация обновляется
+        {% elif lang == 'am' %}
+            📝 Տեղեկատվությունը թարմացվում է
+        {% else %}
+            📝 Content Coming Soon
+        {% endif %}
+    </h3>
+    <p>
+        {% if lang == 'ru' %}
+            Администратор скоро добавит информацию о услугах.
+        {% elif lang == 'am' %}
+            Ադմինիստրատորը շուտով կավելացնի ծառայությունների մասին տեղեկատվություն։
+        {% else %}
+            Content will be available soon.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+<!-- Quick Info Cards -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 3rem 0;">
+    <div class="card" style="text-align: center;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">💻</div>
+        <h3>
+            {% if lang == 'ru' %}
+                Онлайн консультации
+            {% elif lang == 'am' %}
+                Առցանց խորհրդատվություններ
+            {% else %}
+                Online Sessions
+            {% endif %}
+        </h3>
+        <p>
+            {% if lang == 'ru' %}
+                Удобный формат из любой точки мира
+            {% elif lang == 'am' %}
+                Հարմար ձևաչափ աշխարհի ցանկացած կետից
+            {% else %}
+                Convenient from anywhere
+            {% endif %}
+        </p>
+    </div>
+    
+    <div class="card" style="text-align: center;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🤝</div>
+        <h3>
+            {% if lang == 'ru' %}
+                Индивидуальная и парная терапия
+            {% elif lang == 'am' %}
+                Անհատական և զույգերի թերապիա
+            {% else %}
+                Individual & Couples
+            {% endif %}
+        </h3>
+        <p>
+            {% if lang == 'ru' %}
+                Подход, учитывающий ваши потребности
+            {% elif lang == 'am' %}
+                Մոտեցում՝ հաշվի առնելով ձեր կարիքները
+            {% else %}
+                Tailored to your needs
+            {% endif %}
+        </p>
+    </div>
+    
+    <div class="card" style="text-align: center;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">📅</div>
+        <h3>
+            {% if lang == 'ru' %}
+                Гибкий график
+            {% elif lang == 'am' %}
+                Ճկուն գրաֆիկ
+            {% else %}
+                Flexible Schedule
+            {% endif %}
+        </h3>
+        <p>
+            {% if lang == 'ru' %}
+                Запись в удобное для вас время
+            {% elif lang == 'am' %}
+                Գրանցում ձեզ հարմար ժամանակ
+            {% else %}
+                Book at your convenience
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<!-- Floating Book Button -->
+<a href="/book?lang={{ lang }}" class="floating-book-btn">
+    <span>📅</span>
+    <span>
+        {% if lang == 'ru' %}
+            Записаться
+        {% elif lang == 'am' %}
+            Գրանցվել
+        {% else %}
+            Book Now
+        {% endif %}
+    </span>
+</a>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function switchTab(event, tabId) {
+    // Hide all tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Remove active class from all tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+        tab.setAttribute('aria-selected', 'false');
+    });
+    
+    // Show selected tab content
+    document.getElementById(tabId).classList.add('active');
+    
+    // Mark selected tab as active
+    event.currentTarget.classList.add('active');
+    event.currentTarget.setAttribute('aria-selected', 'true');
+}
+</script>
+{% endblock %}

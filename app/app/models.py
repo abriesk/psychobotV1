@@ -1,0 +1,169 @@
+# app/models.py - v1.0.1 with timezone_options support
+import uuid
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Boolean, BigInteger, Text, ForeignKey, DateTime, Enum, UniqueConstraint, JSON
+from sqlalchemy.orm import relationship
+from app.db import Base
+import enum
+
+# ============================================================================
+# ENUMS
+# ============================================================================
+
+class RequestType(enum.Enum):
+    WAITLIST = "waitlist"
+    INDIVIDUAL = "individual"
+    COUPLE = "couple"
+
+class RequestStatus(enum.Enum):
+    PENDING = "pending"
+    NEGOTIATING = "negotiating"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    CANCELED = "canceled"
+
+class SenderType(enum.Enum):
+    ADMIN = "admin"
+    CLIENT = "client"
+
+class SlotStatus(enum.Enum):
+    AVAILABLE = "available"
+    BOOKED = "booked"
+    HELD = "held"
+
+# ============================================================================
+# DEFAULT TIMEZONE OPTIONS
+# ============================================================================
+
+DEFAULT_TIMEZONE_OPTIONS = [
+    {"code": "UTC+4", "label": {"ru": "Ереван", "am": "Ереван"}, "emoji": "🇦🇲", "order": 1},
+    {"code": "UTC+3", "label": {"ru": "Москва", "am": "Москва"}, "emoji": "🇷🇺", "order": 2},
+    {"code": "UTC+2", "label": {"ru": "Киев", "am": "Киев"}, "emoji": "🇺🇦", "order": 3},
+    {"code": "UTC+1", "label": {"ru": "Берлин", "am": "Берлин"}, "emoji": "🇩🇪", "order": 4},
+    {"code": "UTC+0", "label": {"ru": "Лондон", "am": "Лондон"}, "emoji": "🇬🇧", "order": 5},
+    {"code": "UTC-5", "label": {"ru": "Нью-Йорк", "am": "Нью-Йорк"}, "emoji": "🇺🇸", "order": 6},
+]
+
+# ============================================================================
+# CORE TABLES
+# ============================================================================
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(BigInteger, primary_key=True)
+    language = Column(String(2), default='ru')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    requests = relationship("Request", back_populates="user")
+
+class Settings(Base):
+    __tablename__ = 'settings'
+    id = Column(Integer, primary_key=True)
+    availability_on = Column(Boolean, default=True)
+    
+    individual_price = Column(String, default="50 USD / 60 min")
+    couple_price = Column(String, default="70 USD / 60 min")
+    
+    auto_confirm_slots = Column(Boolean, default=False)
+    reminder_24h_enabled = Column(Boolean, default=True)
+    reminder_1h_enabled = Column(Boolean, default=True)
+    cancel_window_hours = Column(Integer, default=24)
+    
+    # v1.0.1: Timezone options for client selection
+    # JSON structure: [{"code": "UTC+4", "label": {"ru": "...", "am": "..."}, "emoji": "🇦🇲", "order": 1}, ...]
+    timezone_options = Column(JSON, default=lambda: DEFAULT_TIMEZONE_OPTIONS)
+
+# ============================================================================
+# v1.0 NEW: TRANSLATION SYSTEM
+# ============================================================================
+
+class Translation(Base):
+    __tablename__ = 'translations'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    lang = Column(String(2), nullable=False, index=True)
+    key = Column(String(100), nullable=False, index=True)
+    value = Column(Text, nullable=False)
+    
+    __table_args__ = (UniqueConstraint('lang', 'key', name='uix_lang_key'),)
+
+# ============================================================================
+# v1.0 NEW: SLOT SYSTEM
+# ============================================================================
+
+class Slot(Base):
+    __tablename__ = 'slots'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    start_time = Column(DateTime, nullable=False, index=True)
+    end_time = Column(DateTime, nullable=False)
+    
+    is_online = Column(Boolean, default=True)
+    status = Column(Enum(SlotStatus), default=SlotStatus.AVAILABLE, index=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    requests = relationship(
+        "Request", 
+        back_populates="slot",
+        foreign_keys="[Request.slot_id]"
+    )
+
+# ============================================================================
+# EXTENDED: REQUEST TABLE
+# ============================================================================
+
+class Request(Base):
+    __tablename__ = 'requests'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_uuid = Column(String, unique=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(BigInteger, ForeignKey('users.id'))
+    
+    type = Column(Enum(RequestType))
+    onsite = Column(Boolean, nullable=True)
+    timezone = Column(String, nullable=True)
+    desired_time = Column(String, nullable=True)
+    problem = Column(Text, nullable=True)
+    address_name = Column(String, nullable=True)
+    preferred_comm = Column(String, nullable=True)
+    
+    status = Column(Enum(RequestStatus), default=RequestStatus.PENDING)
+    final_time = Column(String, nullable=True)
+    
+    # v1.0: Slot-based scheduling
+    slot_id = Column(Integer, ForeignKey('slots.id'), nullable=True)
+    scheduled_datetime = Column(DateTime, nullable=True)
+    
+    # v1.0: Reminder tracking
+    reminder_24h_sent = Column(Boolean, default=False)
+    reminder_1h_sent = Column(Boolean, default=False)
+    reminders_log = Column(JSON, nullable=True)
+    
+    # v1.0: Cancellation tracking
+    cancelled_at = Column(DateTime, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="requests")
+    negotiations = relationship("Negotiation", back_populates="request")
+    slot = relationship(
+        "Slot", 
+        back_populates="requests",
+        foreign_keys=[slot_id]
+    )
+
+# ============================================================================
+# NEGOTIATION HISTORY
+# ============================================================================
+
+class Negotiation(Base):
+    __tablename__ = 'negotiations'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(Integer, ForeignKey('requests.id'))
+    sender = Column(Enum(SenderType))
+    message = Column(Text)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    request = relationship("Request", back_populates="negotiations")

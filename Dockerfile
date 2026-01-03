@@ -19,12 +19,7 @@ COPY alembic.ini .
 # Copy data migration scripts
 COPY migrations/ ./migrations/
 
-# Copy and set entrypoint
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
-
 # Create landings directory if not exists
 RUN mkdir -p landings
 
-# Entrypoint runs migrations, then starts app
-ENTRYPOINT ["./entrypoint.sh"]
+CMD ["python", "-m", "app.main"]
