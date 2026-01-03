@@ -1,7 +1,9 @@
-# app/web/routers/admin.py - Admin management routes (v1.1 with Timezones)
+# app/web/routers/admin.py - Admin management routes (v1.1 with Timezones + v1.0.2 Notification Queue)
 """
 Admin routes for slot management, request handling, settings, landings, languages, and timezones.
 Protected by Nginx Proxy Manager Basic Auth - no internal auth needed.
+
+v1.0.2: Added PendingNotification queue for web→bot Telegram notifications
 """
 from fastapi import APIRouter, Request, Depends, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -13,7 +15,8 @@ from typing import Optional
 
 from app.models import (
     Slot, SlotStatus, Request as BookingRequest, RequestStatus,
-    Settings, Translation, Negotiation, SenderType, Timezone
+    Settings, Translation, Negotiation, SenderType, Timezone,
+    PendingNotification, NotificationType  # v1.0.2: Added for notification queue
 )
 from app.utils_slots import (
     parse_utc_offset, user_tz_to_utc, validate_slot_time,
@@ -441,6 +444,17 @@ async def approve_request(
         if slot:
             slot.status = SlotStatus.BOOKED
     
+    # v1.0.2: Create notification for the user
+    if booking.user_id:
+        notif = PendingNotification(
+            user_id=booking.user_id,
+            request_id=booking.id,
+            notification_type=NotificationType.CONFIRMATION,
+            message="Booking confirmed",
+            proposed_time=booking.final_time or booking.desired_time
+        )
+        session.add(notif)
+    
     await session.commit()
     
     return {"success": True}
@@ -462,6 +476,16 @@ async def reject_request(
     
     booking.status = RequestStatus.REJECTED
     
+    # v1.0.2: Create notification for the user
+    if booking.user_id:
+        notif = PendingNotification(
+            user_id=booking.user_id,
+            request_id=booking.id,
+            notification_type=NotificationType.REJECTION,
+            message="Request rejected"  # Required field - scheduler will use translation
+        )
+        session.add(notif)
+    
     # Release slot if linked
     if booking.slot_id:
         slot_result = await session.execute(select(Slot).where(Slot.id == booking.slot_id))
@@ -471,6 +495,56 @@ async def reject_request(
     
     await session.commit()
     
+    return {"success": True}
+
+
+@router.post("/requests/{request_id}/propose")
+async def propose_new_time(
+    request_id: int,
+    message: str = Form(...),
+    final_time: Optional[str] = Form(None),
+    session: AsyncSession = Depends(get_db)
+):
+    """
+    Admin proposes a different time to the user.
+    v1.0.2: Creates PendingNotification for bot to send via Telegram.
+    """
+    result = await session.execute(
+        select(BookingRequest).where(BookingRequest.id == request_id)
+    )
+    booking = result.scalar_one_or_none()
+    
+    if not booking:
+        raise HTTPException(404, "Request not found")
+    
+    # Update status to negotiating
+    booking.status = RequestStatus.NEGOTIATING
+    
+    # Optionally set proposed final time
+    if final_time:
+        booking.final_time = final_time
+    
+    # Log negotiation message
+    negotiation = Negotiation(
+        request_id=booking.id,
+        sender=SenderType.ADMIN,
+        message=message
+        # timestamp has default=datetime.utcnow
+    )
+    session.add(negotiation)
+    
+    # v1.0.2: Create notification for the user
+    if booking.user_id:
+        notif = PendingNotification(
+            user_id=booking.user_id,
+            request_id=booking.id,
+            notification_type=NotificationType.PROPOSAL,
+            message=message,
+            proposed_time=final_time
+        )
+        session.add(notif)
+    
+    await session.commit()
     return {"success": True}
 
 
