@@ -1,4 +1,4 @@
-# app/db.py - v1.1 with timezone auto-population
+# app/db.py - v1.2 Schema managed by Alembic
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -19,16 +19,12 @@ async def get_db():
 
 async def init_db():
     """
-    Initialize database schema and populate with defaults.
-    Safe for both fresh installs and existing databases.
+    Initialize database with default data.
+    
+    NOTE: Schema is managed by Alembic (runs before app starts via entrypoint.sh).
+    This function only populates default data for fresh installations.
     """
-    # Create all tables from models
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    print("✅ Database schema initialized.")
-    
-    # Auto-populate defaults (translations, settings, timezones)
+    print("🔍 Checking database for default data...")
     await _populate_defaults()
 
 
@@ -70,7 +66,7 @@ async def _populate_defaults():
             print("✅ Default settings created")
         
         # ====================================================================
-        # TIMEZONES (NEW v1.1)
+        # TIMEZONES
         # ====================================================================
         result = await session.execute(select(Timezone).limit(1))
         if not result.scalar_one_or_none():
@@ -88,6 +84,8 @@ async def _populate_defaults():
             
             await session.commit()
             print(f"✅ Populated {len(DEFAULT_TIMEZONES)} default timezones")
+    
+    print("✅ Database initialization complete")
 
 
 # ============================================================================

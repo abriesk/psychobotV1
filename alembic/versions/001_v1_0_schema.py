@@ -1,7 +1,7 @@
 """v1.0 schema: translations, slots, extended settings and requests (FIXED)
 
 Revision ID: 001_v1_0_schema
-Revises: 
+Revises: 000_base_schema
 Create Date: 2025-12-25 09:45:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '001_v1_0_schema'
-down_revision = None
+down_revision = '000_base_schema'
 branch_labels = None
 depends_on = None
 
