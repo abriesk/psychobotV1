@@ -1,7 +1,7 @@
 """Add reminder translation keys to database
 
 Revision ID: 004_reminder_translations
-Revises: 002_add_timezone_options
+Revises: 003_add_timezone_options
 Create Date: 2026-01-01
 
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '004_reminder_translations'
-down_revision = '002_add_timezone_options'  # chains from timezone migration
+down_revision = '003_add_timezone_options'
 branch_labels = None
 depends_on = None
 
