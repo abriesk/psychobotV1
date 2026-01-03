@@ -145,7 +145,7 @@ async def timezone_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = []
     row = []
     for i, tz in enumerate(timezones):
-        btn_text = f"🌍 {tz.offset_str}"
+        btn_text = f"🌍 {tz.offset_str} — {tz.display_name}"
         callback_data = f"tz_{tz.id}_{tz.offset_minutes}"
         row.append(InlineKeyboardButton(btn_text, callback_data=callback_data))
         
